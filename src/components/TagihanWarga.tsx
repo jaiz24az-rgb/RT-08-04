@@ -396,6 +396,9 @@ export default function TagihanWarga({
     isWargaBaru: false,
     mulaiBulan: 'Maret',
     mulaiTahun: 2026,
+    isBebasIuranPermanen: false,
+    alasanBebasIuranPermanen: 'Pembebasan Lansia / Dhuafa / Yatim',
+    defaultDiskon: 0,
     anggotaKeluarga: [] as { id: string; nama: string; hubungan: string; nik?: string; noHape?: string }[],
   });
 
@@ -3002,6 +3005,9 @@ export default function TagihanWarga({
       isWargaBaru: newWarga.isWargaBaru,
       mulaiBulan: newWarga.isWargaBaru ? newWarga.mulaiBulan : undefined,
       mulaiTahun: newWarga.isWargaBaru ? newWarga.mulaiTahun : undefined,
+      isBebasIuranPermanen: newWarga.isBebasIuranPermanen || undefined,
+      alasanBebasIuranPermanen: newWarga.isBebasIuranPermanen ? newWarga.alasanBebasIuranPermanen : undefined,
+      defaultDiskon: (!newWarga.isBebasIuranPermanen && newWarga.defaultDiskon && newWarga.defaultDiskon > 0) ? newWarga.defaultDiskon : undefined,
       iuranRT: iuranRT,
       anggotaKeluarga: newWarga.anggotaKeluarga || [],
     };
@@ -3027,6 +3033,9 @@ export default function TagihanWarga({
       isWargaBaru: false,
       mulaiBulan: 'Maret',
       mulaiTahun: selectedBillingYear || 2026,
+      isBebasIuranPermanen: false,
+      alasanBebasIuranPermanen: 'Pembebasan Lansia / Dhuafa / Yatim',
+      defaultDiskon: 0,
       anggotaKeluarga: [],
     });
 
@@ -3067,6 +3076,9 @@ export default function TagihanWarga({
           isWargaBaru: editingWarga.isWargaBaru,
           mulaiBulan: editingWarga.isWargaBaru ? editingWarga.mulaiBulan : undefined,
           mulaiTahun: editingWarga.isWargaBaru ? editingWarga.mulaiTahun : undefined,
+          isBebasIuranPermanen: editingWarga.isBebasIuranPermanen || undefined,
+          alasanBebasIuranPermanen: editingWarga.isBebasIuranPermanen ? editingWarga.alasanBebasIuranPermanen : undefined,
+          defaultDiskon: (!editingWarga.isBebasIuranPermanen && editingWarga.defaultDiskon && editingWarga.defaultDiskon > 0) ? editingWarga.defaultDiskon : undefined,
           anggotaKeluarga: editingWarga.anggotaKeluarga || [],
         };
       }
@@ -3823,6 +3835,27 @@ export default function TagihanWarga({
     setPaymentReceiptBase64('');
     setPaymentReceiptNamaFile('');
     setPaymentReceipts([]);
+
+    if (warga.isBebasIuranPermanen) {
+      setPayHasDiskon(true);
+      setPayDiskonType('pembebasan');
+      setPayDiskonNominal(total);
+      setPayDiskonAlasan(warga.alasanBebasIuranPermanen || 'Pembebasan Lansia / Dhuafa / Yatim');
+      setPayDiskonAlasanCustom('');
+    } else if (warga.defaultDiskon && warga.defaultDiskon > 0) {
+      setPayHasDiskon(true);
+      setPayDiskonType('nominal');
+      setPayDiskonNominal(warga.defaultDiskon * items.length);
+      setPayDiskonAlasan('Kebijakan Khusus Musyawarah RT');
+      setPayDiskonAlasanCustom('');
+    } else {
+      setPayHasDiskon(false);
+      setPayDiskonType('nominal');
+      setPayDiskonNominal(0);
+      setPayDiskonAlasan('Pembebasan Lansia / Dhuafa / Yatim');
+      setPayDiskonAlasanCustom('');
+    }
+
     setPayingBatchInfo({ warga, category, items, totalNominal: total, billingType });
   };
 
@@ -3836,16 +3869,43 @@ export default function TagihanWarga({
     const finalFotoBase64s = paymentReceipts.length > 0 ? paymentReceipts.map(r => r.base64) : undefined;
     const finalFotoNamaFiles = paymentReceipts.length > 0 ? paymentReceipts.map(r => r.name) : undefined;
 
+    let finalTotalDiskon = 0;
+    let isPembebasan = false;
+    let alasanDiskon = '';
+    let finalNetTotal = totalNominal;
+
+    if (payHasDiskon) {
+      alasanDiskon = payDiskonAlasan === 'Lainnya (Tulis Sendiri)' ? payDiskonAlasanCustom : payDiskonAlasan;
+      if (payDiskonType === 'pembebasan') {
+        isPembebasan = true;
+        finalTotalDiskon = totalNominal;
+        finalNetTotal = 0;
+      } else {
+        finalTotalDiskon = Math.min(totalNominal, payDiskonNominal);
+        finalNetTotal = Math.max(0, totalNominal - finalTotalDiskon);
+        if (finalNetTotal === 0) isPembebasan = true;
+      }
+    }
+
+    const diskonPerMonth = items.length > 0 ? Math.floor(finalTotalDiskon / items.length) : 0;
+
     const updatedWargaList = wargaList.map(w => {
       if (w.id === warga.id) {
         let updatedBillings = [...w[billingType]];
         
         items.forEach(item => {
           const index = updatedBillings.findIndex(b => b.bulan.toLowerCase() === item.bulan.toLowerCase() && (b.tahun === item.tahun || (!b.tahun && item.tahun === 2026)));
+          const itemNetNominal = isPembebasan ? 0 : Math.max(0, item.nominal - diskonPerMonth);
+          const itemDiskon = isPembebasan ? item.nominal : (diskonPerMonth > 0 ? diskonPerMonth : undefined);
+
           if (index > -1) {
             updatedBillings[index] = { 
               ...updatedBillings[index], 
               lunas: true, 
+              nominal: itemNetNominal,
+              diskon: itemDiskon,
+              isPembebasan: isPembebasan || undefined,
+              alasanDiskon: payHasDiskon ? alasanDiskon : undefined,
               tanggalBayar: paymentDate, 
               jamBayar: paymentTime,
               fotoBase64: finalFotoBase64,
@@ -3857,7 +3917,10 @@ export default function TagihanWarga({
             updatedBillings.push({
               bulan: item.bulan,
               lunas: true,
-              nominal: item.nominal,
+              nominal: itemNetNominal,
+              diskon: itemDiskon,
+              isPembebasan: isPembebasan || undefined,
+              alasanDiskon: payHasDiskon ? alasanDiskon : undefined,
               tahun: item.tahun,
               tanggalBayar: paymentDate,
               jamBayar: paymentTime,
@@ -3881,14 +3944,18 @@ export default function TagihanWarga({
     updateWargaList(updatedWargaList);
 
     const nextKas = { ...kas };
-    nextKas[paymentTargetKas] += totalNominal;
+    nextKas[paymentTargetKas] += finalNetTotal;
     updateKas(nextKas);
 
     const itemsDescription = items.map(item => `${item.bulan} ${item.tahun}`).join(', ');
+    const descSuffix = isPembebasan 
+      ? ` [Bebas 100%: ${alasanDiskon}]` 
+      : (finalTotalDiskon > 0 ? ` [Diskon Rp ${finalTotalDiskon.toLocaleString('id-ID')}: ${alasanDiskon}]` : '');
+
     addLedgerEntry({
       tanggal: paymentDate,
-      deskripsi: `${category} Kolektif (${itemsDescription}) - ${warga.nama} (Blok ${warga.blok}-${warga.noRumah})`,
-      jumlah: totalNominal,
+      deskripsi: `${category} Kolektif (${itemsDescription}) - ${warga.nama} (Blok ${warga.blok}-${warga.noRumah})${descSuffix}`,
+      jumlah: finalNetTotal,
       tipe: 'pemasukan',
       sumberKas: paymentTargetKas,
       kategori: category,
@@ -3909,12 +3976,15 @@ export default function TagihanWarga({
       category,
       bulan: itemsDescription,
       tahun: 0,
-      nominal: totalNominal,
+      nominal: finalNetTotal,
+      diskon: finalTotalDiskon > 0 ? finalTotalDiskon : undefined,
+      isPembebasan: isPembebasan || undefined,
+      alasanDiskon: payHasDiskon ? alasanDiskon : undefined,
       tanggalBayar: paymentDate,
       jamBayar: paymentTime,
       kasPenerima: paymentTargetKas,
       petugas: currentUser?.nama || 'Petugas RT',
-      catatan: paymentReceiptNamaFile ? `Gambar struk: ${paymentReceiptNamaFile}` : ''
+      catatan: (isPembebasan ? `Bebas Iuran Kolektif (${alasanDiskon})` : (finalTotalDiskon > 0 ? `Diskon Kolektif Rp ${finalTotalDiskon.toLocaleString('id-ID')} (${alasanDiskon})` : '')) + (paymentReceiptNamaFile ? ` | Gambar struk: ${paymentReceiptNamaFile}` : '')
     });
 
     setPayingBatchInfo(null);
@@ -6657,6 +6727,52 @@ export default function TagihanWarga({
               )}
             </div>
 
+            {/* Status Diskon / Pembebasan Iuran RT Permanen Warga */}
+            <div className="md:col-span-3 bg-purple-50/50 border border-purple-200/80 rounded-xl p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="add-checkbox-bebas-permanen"
+                  checked={newWarga.isBebasIuranPermanen || false}
+                  onChange={e => setNewWarga({ ...newWarga, isBebasIuranPermanen: e.target.checked })}
+                  className="w-4 h-4 text-purple-600 border-purple-300 rounded focus:ring-purple-500 cursor-pointer"
+                />
+                <label htmlFor="add-checkbox-bebas-permanen" className="text-xs font-extrabold text-purple-950 cursor-pointer select-none flex items-center gap-1.5">
+                  <Tag className="w-4 h-4 text-purple-600" />
+                  Status Khusus: Bebas Iuran RT Permanen (Bebas Total 100%)
+                </label>
+              </div>
+
+              {newWarga.isBebasIuranPermanen ? (
+                <div className="pl-6 space-y-2">
+                  <label className="block text-[11px] font-bold text-purple-900">Alasan Pembebasan Iuran Permanen:</label>
+                  <select
+                    value={newWarga.alasanBebasIuranPermanen || 'Pembebasan Lansia / Dhuafa / Yatim'}
+                    onChange={e => setNewWarga({ ...newWarga, alasanBebasIuranPermanen: e.target.value })}
+                    className="w-full bg-white border border-purple-200 rounded-xl p-2 text-xs font-bold text-purple-900"
+                  >
+                    {REASONS_DISKON_PEMBEBASAN.map((r, idx) => (
+                      <option key={idx} value={r}>{r}</option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <div className="pl-6 flex items-center gap-3">
+                  <label className="text-[11px] font-bold text-purple-900 shrink-0">Default Diskon Rutin (Rp/Bulan):</label>
+                  <input
+                    type="number"
+                    step="1000"
+                    min="0"
+                    placeholder="0 (Tidak Ada Diskon)"
+                    value={newWarga.defaultDiskon || 0}
+                    onChange={e => setNewWarga({ ...newWarga, defaultDiskon: Number(e.target.value) })}
+                    className="w-40 bg-white border border-purple-200 rounded-xl p-1.5 text-xs font-mono font-bold text-purple-950 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  />
+                  <span className="text-[10px] text-purple-700 italic">(Otomatis terisi saat catat bayar)</span>
+                </div>
+              )}
+            </div>
+
               {/* Bagian Anggota Keluarga */}
               <div className="md:col-span-3 border-t border-slate-100 pt-4 mt-2">
                 <h5 className="text-xs font-bold text-slate-700 font-sans uppercase mb-3 flex items-center gap-1.5">
@@ -7130,6 +7246,52 @@ export default function TagihanWarga({
                         <option key={yr} value={yr}>{yr}</option>
                       ))}
                     </select>
+                  </div>
+                )}
+              </div>
+
+              {/* Status Diskon / Pembebasan Iuran RT Permanen Warga */}
+              <div className="bg-purple-50/50 border border-purple-200/80 rounded-xl p-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="edit-checkbox-bebas-permanen"
+                    checked={editingWarga.isBebasIuranPermanen || false}
+                    onChange={e => setEditingWarga({ ...editingWarga, isBebasIuranPermanen: e.target.checked })}
+                    className="w-4 h-4 text-purple-600 border-purple-300 rounded focus:ring-purple-500 cursor-pointer"
+                  />
+                  <label htmlFor="edit-checkbox-bebas-permanen" className="text-xs font-extrabold text-purple-950 cursor-pointer select-none flex items-center gap-1.5">
+                    <Tag className="w-4 h-4 text-purple-600" />
+                    Status Khusus: Bebas Iuran RT Permanen (Bebas Total 100%)
+                  </label>
+                </div>
+
+                {editingWarga.isBebasIuranPermanen ? (
+                  <div className="pl-6 space-y-2">
+                    <label className="block text-[11px] font-bold text-purple-900">Alasan Pembebasan Iuran Permanen:</label>
+                    <select
+                      value={editingWarga.alasanBebasIuranPermanen || 'Pembebasan Lansia / Dhuafa / Yatim'}
+                      onChange={e => setEditingWarga({ ...editingWarga, alasanBebasIuranPermanen: e.target.value })}
+                      className="w-full bg-white border border-purple-200 rounded-xl p-2 text-xs font-bold text-purple-900"
+                    >
+                      {REASONS_DISKON_PEMBEBASAN.map((r, idx) => (
+                        <option key={idx} value={r}>{r}</option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <div className="pl-6 flex items-center gap-3">
+                    <label className="text-[11px] font-bold text-purple-900 shrink-0">Default Diskon Rutin (Rp/Bulan):</label>
+                    <input
+                      type="number"
+                      step="1000"
+                      min="0"
+                      placeholder="0 (Tidak Ada Diskon)"
+                      value={editingWarga.defaultDiskon || 0}
+                      onChange={e => setEditingWarga({ ...editingWarga, defaultDiskon: Number(e.target.value) })}
+                      className="w-40 bg-white border border-purple-200 rounded-xl p-1.5 text-xs font-mono font-bold text-purple-950 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    />
+                    <span className="text-[10px] text-purple-700 italic">(Otomatis terisi saat catat bayar)</span>
                   </div>
                 )}
               </div>
@@ -7798,7 +7960,13 @@ export default function TagihanWarga({
                       type="checkbox"
                       id="enable-pay-diskon"
                       checked={payHasDiskon}
-                      onChange={(e) => setPayHasDiskon(e.target.checked)}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setPayHasDiskon(checked);
+                        if (checked && payDiskonNominal === 0) {
+                          setPayDiskonNominal(payingInfo.warga.defaultDiskon || 10000);
+                        }
+                      }}
                       className="w-4 h-4 text-purple-600 rounded focus:ring-purple-500 cursor-pointer"
                     />
                     <label htmlFor="enable-pay-diskon" className="text-xs font-extrabold text-purple-900 cursor-pointer flex items-center gap-1.5 select-none">
@@ -8226,6 +8394,191 @@ export default function TagihanWarga({
                         <span className="text-[8px] font-bold">Tambah</span>
                       </label>
                     </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Diskon & Pembebasan Option for Batch Payment */}
+              <div className="bg-purple-50/80 border border-purple-200 rounded-2xl p-4 space-y-3 shadow-xs">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Tag className="w-4 h-4 text-purple-600" />
+                    <div>
+                      <span className="text-xs font-extrabold text-purple-950 block">Diskon / Pembebasan Iuran Kolektif</span>
+                      <span className="text-[10px] text-purple-700">Bisa beri diskon per bulan atau bebas total {payingBatchInfo.items.length} bulan</span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextHasDiskon = !payHasDiskon;
+                      setPayHasDiskon(nextHasDiskon);
+                      if (nextHasDiskon && payDiskonNominal === 0) {
+                        const defaultVal = (payingBatchInfo.warga.defaultDiskon && payingBatchInfo.warga.defaultDiskon > 0)
+                          ? payingBatchInfo.warga.defaultDiskon * payingBatchInfo.items.length
+                          : 10000 * payingBatchInfo.items.length;
+                        setPayDiskonNominal(defaultVal);
+                      }
+                    }}
+                    className={`text-xs font-bold px-3 py-1.5 rounded-xl transition cursor-pointer shadow-xs active:scale-95 ${
+                      payHasDiskon
+                        ? 'bg-purple-600 text-white hover:bg-purple-700'
+                        : 'bg-white text-purple-700 border border-purple-300 hover:bg-purple-100'
+                    }`}
+                  >
+                    {payHasDiskon ? '✓ Diskon Aktif' : '+ Beri Diskon / Bebas'}
+                  </button>
+                </div>
+
+                {payHasDiskon && (
+                  <div className="space-y-3.5 pt-2 border-t border-purple-200/80 animate-in fade-in duration-150">
+                    {/* Mode Diskon Selection */}
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPayDiskonType('nominal');
+                          if (payDiskonNominal === 0 || payDiskonNominal === payingBatchInfo.totalNominal) {
+                            setPayDiskonNominal(10000 * payingBatchInfo.items.length);
+                          }
+                        }}
+                        className={`py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                          payDiskonType === 'nominal'
+                            ? 'bg-purple-600 text-white shadow-sm ring-2 ring-purple-600/20'
+                            : 'bg-white text-purple-700 border border-purple-200 hover:bg-purple-100'
+                        }`}
+                      >
+                        Potongan Nominal (Rp)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPayDiskonType('pembebasan');
+                          setPayDiskonNominal(payingBatchInfo.totalNominal);
+                        }}
+                        className={`py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                          payDiskonType === 'pembebasan'
+                            ? 'bg-purple-700 text-white shadow-sm ring-2 ring-purple-700/20'
+                            : 'bg-white text-purple-700 border border-purple-200 hover:bg-purple-100'
+                        }`}
+                      >
+                        Pembebasan Total (100%)
+                      </button>
+                    </div>
+
+                    {/* Tombol Pilihan Cepat / Preset Diskon */}
+                    {payDiskonType === 'nominal' && (
+                      <div className="space-y-2">
+                        <label className="block text-[11px] font-bold text-purple-900">Pilihan Cepat Diskon Kolektif:</label>
+                        <div className="flex flex-wrap gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setPayDiskonNominal(5000 * payingBatchInfo.items.length)}
+                            className="px-2.5 py-1 bg-white hover:bg-purple-100 border border-purple-200 text-purple-900 rounded-lg text-[10.5px] font-bold transition cursor-pointer"
+                          >
+                            Rp 5rb / bln (Total: Rp {(5000 * payingBatchInfo.items.length).toLocaleString('id-ID')})
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPayDiskonNominal(10000 * payingBatchInfo.items.length)}
+                            className="px-2.5 py-1 bg-white hover:bg-purple-100 border border-purple-200 text-purple-900 rounded-lg text-[10.5px] font-bold transition cursor-pointer"
+                          >
+                            Rp 10rb / bln (Total: Rp {(10000 * payingBatchInfo.items.length).toLocaleString('id-ID')})
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPayDiskonNominal(15000 * payingBatchInfo.items.length)}
+                            className="px-2.5 py-1 bg-white hover:bg-purple-100 border border-purple-200 text-purple-900 rounded-lg text-[10.5px] font-bold transition cursor-pointer"
+                          >
+                            Rp 15rb / bln (Total: Rp {(15000 * payingBatchInfo.items.length).toLocaleString('id-ID')})
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPayDiskonNominal(Math.floor(payingBatchInfo.totalNominal * 0.5))}
+                            className="px-2.5 py-1 bg-white hover:bg-purple-100 border border-purple-200 text-purple-900 rounded-lg text-[10.5px] font-bold transition cursor-pointer"
+                          >
+                            Diskon 50% (Rp {Math.floor(payingBatchInfo.totalNominal * 0.5).toLocaleString('id-ID')})
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 pt-1">
+                          <div>
+                            <label className="block text-[10.5px] font-bold text-purple-900 mb-1">Diskon Total ({payingBatchInfo.items.length} Bulan):</label>
+                            <input
+                              type="number"
+                              step="1000"
+                              min="0"
+                              max={payingBatchInfo.totalNominal}
+                              value={payDiskonNominal}
+                              onChange={(e) => setPayDiskonNominal(Number(e.target.value))}
+                              className="w-full bg-white border border-purple-300 rounded-xl p-2 text-xs font-mono font-bold text-purple-950 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10.5px] font-bold text-purple-900 mb-1">Atau Potongan per Bulan (Rp):</label>
+                            <input
+                              type="number"
+                              step="1000"
+                              min="0"
+                              value={payingBatchInfo.items.length > 0 ? Math.floor(payDiskonNominal / payingBatchInfo.items.length) : 0}
+                              onChange={(e) => setPayDiskonNominal(Number(e.target.value) * payingBatchInfo.items.length)}
+                              className="w-full bg-white border border-purple-300 rounded-xl p-2 text-xs font-mono font-bold text-purple-950 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="block text-[11px] font-semibold text-purple-900 mb-1">Alasan Diskon / Pembebasan Iuran</label>
+                      <select
+                        value={payDiskonAlasan}
+                        onChange={(e) => setPayDiskonAlasan(e.target.value)}
+                        className="w-full bg-white border border-purple-300 rounded-xl p-2 text-xs text-purple-950 font-bold focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      >
+                        {REASONS_DISKON_PEMBEBASAN.map((r, idx) => (
+                          <option key={idx} value={r}>{r}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {payDiskonAlasan === 'Lainnya (Tulis Sendiri)' && (
+                      <div>
+                        <label className="block text-[10px] font-semibold text-purple-800 mb-1">Tulis Alasan Khusus:</label>
+                        <input
+                          type="text"
+                          value={payDiskonAlasanCustom}
+                          onChange={(e) => setPayDiskonAlasanCustom(e.target.value)}
+                          placeholder="Contoh: Diskon khusus bayar lunas setahun, rekomendasi ketua RT, dll..."
+                          className="w-full bg-white border border-purple-300 rounded-xl p-2 text-xs text-purple-950 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        />
+                      </div>
+                    )}
+
+                    {/* Live calculation preview */}
+                    {(() => {
+                      const actualDiskon = payDiskonType === 'pembebasan' ? payingBatchInfo.totalNominal : Math.min(payingBatchInfo.totalNominal, payDiskonNominal);
+                      const netPay = payDiskonType === 'pembebasan' ? 0 : Math.max(0, payingBatchInfo.totalNominal - payDiskonNominal);
+                      const diskonPerM = payingBatchInfo.items.length > 0 ? Math.floor(actualDiskon / payingBatchInfo.items.length) : 0;
+                      const netPerM = payingBatchInfo.items.length > 0 ? Math.floor(netPay / payingBatchInfo.items.length) : 0;
+
+                      return (
+                        <div className="bg-purple-100/90 border border-purple-200/90 rounded-xl p-3 text-xs text-purple-900 font-mono space-y-1.5 shadow-xs">
+                          <div className="flex justify-between items-center text-[11px]">
+                            <span>Total Normal ({payingBatchInfo.items.length} Bulan):</span>
+                            <span className="font-bold">Rp {payingBatchInfo.totalNominal.toLocaleString('id-ID')}</span>
+                          </div>
+                          <div className="flex justify-between items-center text-rose-600 font-bold text-[11px]">
+                            <span>Diskon / Potongan Total:</span>
+                            <span>- Rp {actualDiskon.toLocaleString('id-ID')} <span className="text-[10px] font-normal text-purple-700">({diskonPerM.toLocaleString('id-ID')}/bln)</span></span>
+                          </div>
+                          <div className="flex justify-between items-center font-extrabold text-emerald-800 text-sm border-t border-purple-200/80 pt-1.5">
+                            <span>Total Net Setor Kas / Bayar:</span>
+                            <span>Rp {netPay.toLocaleString('id-ID')} <span className="text-[10px] font-normal text-emerald-700">({netPerM.toLocaleString('id-ID')}/bln)</span></span>
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
               </div>
