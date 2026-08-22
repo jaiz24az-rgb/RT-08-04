@@ -36,7 +36,8 @@ service cloud.firestore {
         && (!('bankNoRek' in data) || (data.bankNoRek is string && data.bankNoRek.size() <= 100))
         && (!('bankPenerima' in data) || (data.bankPenerima is string && data.bankPenerima.size() <= 200))
         && (!('bankCatatanVendor' in data) || (data.bankCatatanVendor is string && data.bankCatatanVendor.size() <= 2000))
-        && (!('meetingNotulen' in data) || (data.meetingNotulen is string && data.meetingNotulen.size() <= 20000));
+        && (!('meetingNotulen' in data) || (data.meetingNotulen is string && data.meetingNotulen.size() <= 20000))
+        && (!('isCouponFeatureEnabled' in data) || data.isCouponFeatureEnabled is bool);
     }
 
     // Settings collection rules
@@ -154,6 +155,84 @@ service cloud.firestore {
     match /official_letters/{letterId} {
       allow read: if true;
       allow write: if isValidId(letterId) && (request.resource == null || isValidOfficialLetter(incoming()));
+    }
+
+    // 7. Event Coupon Validator
+    function isValidEventCoupon(data) {
+      return (!('id' in data) || data.id is string)
+        && (!('namaAcara' in data) || (data.namaAcara is string && data.namaAcara.size() <= 500))
+        && (!('deskripsi' in data) || (data.deskripsi is string && data.deskripsi.size() <= 2000))
+        && (!('hargaPerKupon' in data) || data.hargaPerKupon is int || data.hargaPerKupon is float)
+        && (!('targetKupon' in data) || data.targetKupon is int)
+        && (!('prefixKupon' in data) || (data.prefixKupon is string && data.prefixKupon.size() <= 20))
+        && (!('nomorMulai' in data) || data.nomorMulai is int)
+        && (!('tanggalMulai' in data) || data.tanggalMulai is string)
+        && (!('tanggalSelesai' in data) || data.tanggalSelesai is string)
+        && (!('status' in data) || (data.status is string && (data.status == 'aktif' || data.status == 'selesai' || data.status == 'arsip')))
+        && (!('hadiahDoorprize' in data) || data.hadiahDoorprize is list)
+        && (!('kontakPanitia' in data) || data.kontakPanitia is string)
+        && (!('rekeningPanitia' in data) || data.rekeningPanitia is string)
+        && (!('qrisBase64' in data) || data.qrisBase64 is string)
+        && (!('qrisNamaFile' in data) || data.qrisNamaFile is string)
+        && (!('createdAt' in data) || data.createdAt is string)
+        && (!('createdBy' in data) || data.createdBy is string);
+    }
+
+    match /event_coupons/{couponId} {
+      allow read: if true;
+      allow write: if isValidId(couponId) && (request.resource == null || isValidEventCoupon(incoming()));
+    }
+
+    // 8. Coupon Orders Validator
+    function isValidCouponOrder(data) {
+      return (!('id' in data) || data.id is string)
+        && (!('eventId' in data) || data.eventId is string)
+        && (!('wargaId' in data) || data.wargaId is string)
+        && (!('namaPembeli' in data) || (data.namaPembeli is string && data.namaPembeli.size() <= 300))
+        && (!('blokRumah' in data) || data.blokRumah is string)
+        && (!('noWa' in data) || data.noWa is string)
+        && (!('jumlahKupon' in data) || data.jumlahKupon is int)
+        && (!('hargaSatuan' in data) || data.hargaSatuan is int || data.hargaSatuan is float)
+        && (!('totalBayar' in data) || data.totalBayar is int || data.totalBayar is float)
+        && (!('nomorKupon' in data) || data.nomorKupon is list)
+        && (!('tanggalBeli' in data) || data.tanggalBeli is string)
+        && (!('jamBeli' in data) || data.jamBeli is string)
+        && (!('metodeBayar' in data) || (data.metodeBayar is string && (data.metodeBayar == 'tunai' || data.metodeBayar == 'transfer' || data.metodeBayar == 'qris')))
+        && (!('statusBayar' in data) || (data.statusBayar is string && (data.statusBayar == 'lunas' || data.statusBayar == 'belum_bayar')))
+        && (!('petugas' in data) || data.petugas is string)
+        && (!('catatan' in data) || data.catatan is string)
+        && (!('fotoBuktiBase64' in data) || data.fotoBuktiBase64 is string)
+        && (!('fotoBuktiNamaFile' in data) || data.fotoBuktiNamaFile is string)
+        && (!('isPemenang' in data) || data.isPemenang is bool)
+        && (!('hadiahDimenangkan' in data) || data.hadiahDimenangkan is string)
+        && (!('nomorKuponMenang' in data) || data.nomorKuponMenang is string)
+        && (!('createdAt' in data) || data.createdAt is string);
+    }
+
+    match /coupon_orders/{orderId} {
+      allow read: if true;
+      allow write: if isValidId(orderId) && (request.resource == null || isValidCouponOrder(incoming()));
+    }
+
+    // 9. Event Ledger Validator
+    function isValidEventLedger(data) {
+      return (!('id' in data) || data.id is string)
+        && (!('eventId' in data) || data.eventId is string)
+        && (!('tanggal' in data) || data.tanggal is string)
+        && (!('tipe' in data) || (data.tipe is string && (data.tipe == 'pemasukan' || data.tipe == 'pengeluaran')))
+        && (!('kategori' in data) || data.kategori is string)
+        && (!('deskripsi' in data) || (data.deskripsi is string && data.deskripsi.size() <= 2000))
+        && (!('jumlah' in data) || data.jumlah is int || data.jumlah is float)
+        && (!('petugas' in data) || data.petugas is string)
+        && (!('orderId' in data) || data.orderId is string)
+        && (!('fotoBase64' in data) || data.fotoBase64 is string)
+        && (!('fotoNamaFile' in data) || data.fotoNamaFile is string)
+        && (!('createdAt' in data) || data.createdAt is string);
+    }
+
+    match /event_ledger/{ledgerId} {
+      allow read: if true;
+      allow write: if isValidId(ledgerId) && (request.resource == null || isValidEventLedger(incoming()));
     }
   }
 }

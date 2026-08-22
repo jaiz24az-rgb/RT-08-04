@@ -143,4 +143,65 @@ export interface OfficialLetter {
   createdBy: string; // role or name of creator
 }
 
+export interface EventCoupon {
+  id: string;
+  namaAcara: string; // e.g. "Kupon Jalan Sehat & Bazar 17 Agustus 2026"
+  deskripsi: string;
+  hargaPerKupon: number; // e.g. 5000
+  targetKupon?: number; // e.g. 1000
+  prefixKupon: string; // e.g. "JS-" or "17A-"
+  nomorMulai: number; // e.g. 1
+  tanggalMulai: string; // YYYY-MM-DD
+  tanggalSelesai: string; // YYYY-MM-DD
+  status: 'aktif' | 'selesai' | 'arsip';
+  hadiahDoorprize?: string[]; // e.g. ["Kulkas 1 Pintu", "Sepeda Gunung", "Kipas Angin", "Setrika", "50 Hadiah Hiburan"]
+  kontakPanitia?: string;
+  rekeningPanitia?: string;
+  qrisBase64?: string;
+  qrisNamaFile?: string;
+  createdAt: string;
+  createdBy: string;
+}
+
+export interface CouponOrder {
+  id: string;
+  eventId: string;
+  wargaId?: string;
+  namaPembeli: string;
+  blokRumah?: string; // e.g. "A4 / 12" or "Warga Luar RT"
+  noWa?: string;
+  jumlahKupon: number;
+  hargaSatuan: number;
+  totalBayar: number;
+  nomorKupon: string[]; // e.g. ["JS-001", "JS-002", "JS-003"]
+  tanggalBeli: string; // YYYY-MM-DD
+  jamBeli?: string; // HH:mm
+  metodeBayar: 'tunai' | 'transfer' | 'qris';
+  statusBayar: 'lunas' | 'belum_bayar';
+  petugas: string;
+  catatan?: string;
+  fotoBuktiBase64?: string;
+  fotoBuktiNamaFile?: string;
+  isPemenang?: boolean;
+  hadiahDimenangkan?: string;
+  nomorKuponMenang?: string;
+  createdAt: string;
+}
+
+export interface EventLedgerEntry {
+  id: string;
+  eventId: string;
+  tanggal: string; // YYYY-MM-DD
+  tipe: 'pemasukan' | 'pengeluaran';
+  kategori: string; // e.g. "Penjualan Kupon", "Donasi / Sponsor", "Hadiah Doorprize", "Sewa Tenda & Sound", "Konsumsi", "Operasional"
+  deskripsi: string;
+  jumlah: number;
+  petugas: string;
+  orderId?: string; // Links to CouponOrder if auto-generated
+  fotoBase64?: string;
+  fotoNamaFile?: string;
+  createdAt: string;
+}
+
+
 

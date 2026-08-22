@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Balance, LedgerEntry, WargaBill, RombongBill, AppUser, OfficialLetter } from './types';
-import { INITIAL_BALANCES, INITIAL_LEDGER, INITIAL_WARGA, INITIAL_ROMBONG, INITIAL_USERS } from './data';
+import { Balance, LedgerEntry, WargaBill, RombongBill, AppUser, OfficialLetter, EventCoupon, CouponOrder, EventLedgerEntry } from './types';
+import { INITIAL_BALANCES, INITIAL_LEDGER, INITIAL_WARGA, INITIAL_ROMBONG, INITIAL_USERS, INITIAL_EVENT_COUPONS, INITIAL_COUPON_ORDERS, INITIAL_EVENT_LEDGER } from './data';
 import { 
   collection, 
   doc, 
@@ -30,7 +30,16 @@ import {
   deleteRombongBill,
   getOfficialLetters,
   saveOfficialLetter,
-  deleteOfficialLetter
+  deleteOfficialLetter,
+  getEventCoupons,
+  saveEventCoupon,
+  deleteEventCoupon,
+  getCouponOrders,
+  saveCouponOrder,
+  deleteCouponOrder,
+  getEventLedger,
+  saveEventLedgerEntry,
+  deleteEventLedgerEntry
 } from './supabase';
 import Dashboard from './components/Dashboard';
 import { safeStorage as localStorage } from './utils/safeStorage';
@@ -42,6 +51,7 @@ import LoginModal from './components/LoginModal';
 import UserManagementModal from './components/UserManagementModal';
 import LandingPage from './components/LandingPage';
 import Undangan from './components/Undangan';
+import { KuponAcara } from './components/KuponAcara';
 import { 
   Coins, 
   LayoutDashboard, 
@@ -65,7 +75,8 @@ import {
   Unlock,
   Mail,
   X,
-  Wifi
+  Wifi,
+  Ticket
 } from 'lucide-react';
 
 const ensurePaidFor2024toMei2026_Warga = (wList: WargaBill[]): WargaBill[] => {
@@ -412,7 +423,7 @@ const safeFetchSaveLocalSync = async (baseUrl: string, payload: any): Promise<an
 };
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'tagihan' | 'buku_kas' | 'buku_kolektor' | 'undangan' | 'panduan'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'tagihan' | 'buku_kas' | 'buku_kolektor' | 'undangan' | 'kupon' | 'panduan'>('dashboard');
   const [usersList, setUsersList] = useState<AppUser[]>(() => {
     try {
       const saved = localStorage.getItem('perumtas_rt08_users');
@@ -556,6 +567,17 @@ export default function App() {
     setMeetingNotulen(val);
     localStorage.setItem('perumtas_rt08_meeting_notulen', val);
     upsertGeneralSettings({ meetingNotulen: val });
+  };
+
+  const [isCouponFeatureEnabled, setIsCouponFeatureEnabled] = useState<boolean>(() => {
+    const saved = localStorage.getItem('perumtas_rt08_coupon_feature_enabled');
+    return saved !== null ? saved === 'true' : true;
+  });
+
+  const updateIsCouponFeatureEnabled = (val: boolean) => {
+    setIsCouponFeatureEnabled(val);
+    localStorage.setItem('perumtas_rt08_coupon_feature_enabled', val.toString());
+    upsertGeneralSettings({ isCouponFeatureEnabled: val });
   };
 
   useEffect(() => {
@@ -841,6 +863,57 @@ export default function App() {
       return [];
     }
   });
+
+  const [eventCoupons, setEventCoupons] = useState<EventCoupon[]>(() => {
+    try {
+      const saved = localStorage.getItem('perumtas_rt08_event_coupons');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+      return INITIAL_EVENT_COUPONS;
+    } catch {
+      return INITIAL_EVENT_COUPONS;
+    }
+  });
+
+  const [couponOrders, setCouponOrders] = useState<CouponOrder[]>(() => {
+    try {
+      const saved = localStorage.getItem('perumtas_rt08_coupon_orders');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+      return INITIAL_COUPON_ORDERS;
+    } catch {
+      return INITIAL_COUPON_ORDERS;
+    }
+  });
+
+  const [eventLedgerList, setEventLedgerList] = useState<EventLedgerEntry[]>(() => {
+    try {
+      const saved = localStorage.getItem('perumtas_rt08_event_ledger');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+      return INITIAL_EVENT_LEDGER;
+    } catch {
+      return INITIAL_EVENT_LEDGER;
+    }
+  });
+
+  useEffect(() => {
+    localStorage.setItem('perumtas_rt08_event_coupons', JSON.stringify(eventCoupons));
+  }, [eventCoupons]);
+
+  useEffect(() => {
+    localStorage.setItem('perumtas_rt08_coupon_orders', JSON.stringify(couponOrders));
+  }, [couponOrders]);
+
+  useEffect(() => {
+    localStorage.setItem('perumtas_rt08_event_ledger', JSON.stringify(eventLedgerList));
+  }, [eventLedgerList]);
 
   // --- STATE-STATE UNTUK SINKRONISASI SERVER LOKAL WI-FI ---
   const [localSyncEnabled, setLocalSyncEnabled] = useState<boolean>(() => {
@@ -1180,6 +1253,7 @@ export default function App() {
             if (settings.bankPenerima !== undefined) setBankPenerima(settings.bankPenerima);
             if (settings.bankCatatanVendor !== undefined) setBankCatatanVendor(settings.bankCatatanVendor);
             if (settings.meetingNotulen !== undefined) setMeetingNotulen(settings.meetingNotulen);
+            if (settings.isCouponFeatureEnabled !== undefined) setIsCouponFeatureEnabled(settings.isCouponFeatureEnabled);
           } else {
             // Seed settings
             await upsertGeneralSettings({
@@ -1201,7 +1275,8 @@ export default function App() {
               bankNoRek,
               bankPenerima,
               bankCatatanVendor,
-              meetingNotulen
+              meetingNotulen,
+              isCouponFeatureEnabled
             });
           }
         }
@@ -1225,8 +1300,8 @@ export default function App() {
           if (ledgers.length > 0) {
             setLedger(ledgers);
           } else if (ledger.length > 0) {
-            for (const e of ledger) {
-              await saveLedgerEntry(e);
+            for (const l of ledger) {
+              await saveLedgerEntry(l);
             }
           }
         }
@@ -1263,6 +1338,42 @@ export default function App() {
           } else if (lettersList.length > 0) {
             for (const letItem of lettersList) {
               await saveOfficialLetter(letItem);
+            }
+          }
+        }
+
+        // 7. Load Event Coupons
+        const evCoupons = await getEventCoupons();
+        if (isMounted) {
+          if (evCoupons.length > 0) {
+            setEventCoupons(evCoupons);
+          } else if (eventCoupons.length > 0) {
+            for (const ec of eventCoupons) {
+              await saveEventCoupon(ec);
+            }
+          }
+        }
+
+        // 8. Load Coupon Orders
+        const cpOrders = await getCouponOrders();
+        if (isMounted) {
+          if (cpOrders.length > 0) {
+            setCouponOrders(cpOrders);
+          } else if (couponOrders.length > 0) {
+            for (const co of couponOrders) {
+              await saveCouponOrder(co);
+            }
+          }
+        }
+
+        // 9. Load Event Ledger
+        const evLedger = await getEventLedger();
+        if (isMounted) {
+          if (evLedger.length > 0) {
+            setEventLedgerList(evLedger);
+          } else if (eventLedgerList.length > 0) {
+            for (const el of eventLedgerList) {
+              await saveEventLedgerEntry(el);
             }
           }
         }
@@ -1502,6 +1613,63 @@ export default function App() {
       setCloudErrorMsg(err instanceof Error ? err.message : String(err));
     });
 
+    // 7. event_coupons
+    const unsubscribeEventCoupons = onSnapshot(collection(db, 'event_coupons'), (snapshot) => {
+      setCloudStatus('connected');
+      if (snapshot.empty) {
+        if (eventCoupons.length > 0) {
+          eventCoupons.forEach((ec) => {
+            setDoc(doc(db, 'event_coupons', ec.id), ec)
+              .catch((err) => handleFirestoreError(err, OperationType.WRITE, `event_coupons/${ec.id}`));
+          });
+        }
+      } else {
+        const list: EventCoupon[] = [];
+        snapshot.forEach((docSnap) => list.push(docSnap.data() as EventCoupon));
+        setEventCoupons(list);
+      }
+    }, (err) => {
+      handleFirestoreError(err, OperationType.GET, 'event_coupons');
+    });
+
+    // 8. coupon_orders
+    const unsubscribeCouponOrders = onSnapshot(collection(db, 'coupon_orders'), (snapshot) => {
+      setCloudStatus('connected');
+      if (snapshot.empty) {
+        if (couponOrders.length > 0) {
+          couponOrders.forEach((co) => {
+            setDoc(doc(db, 'coupon_orders', co.id), co)
+              .catch((err) => handleFirestoreError(err, OperationType.WRITE, `coupon_orders/${co.id}`));
+          });
+        }
+      } else {
+        const list: CouponOrder[] = [];
+        snapshot.forEach((docSnap) => list.push(docSnap.data() as CouponOrder));
+        setCouponOrders(list);
+      }
+    }, (err) => {
+      handleFirestoreError(err, OperationType.GET, 'coupon_orders');
+    });
+
+    // 9. event_ledger
+    const unsubscribeEventLedger = onSnapshot(collection(db, 'event_ledger'), (snapshot) => {
+      setCloudStatus('connected');
+      if (snapshot.empty) {
+        if (eventLedgerList.length > 0) {
+          eventLedgerList.forEach((el) => {
+            setDoc(doc(db, 'event_ledger', el.id), el)
+              .catch((err) => handleFirestoreError(err, OperationType.WRITE, `event_ledger/${el.id}`));
+          });
+        }
+      } else {
+        const list: EventLedgerEntry[] = [];
+        snapshot.forEach((docSnap) => list.push(docSnap.data() as EventLedgerEntry));
+        setEventLedgerList(list);
+      }
+    }, (err) => {
+      handleFirestoreError(err, OperationType.GET, 'event_ledger');
+    });
+
     return () => {
       unsubscribeSettings();
       unsubscribeUsers();
@@ -1509,6 +1677,9 @@ export default function App() {
       unsubscribeWarga();
       unsubscribeRombong();
       unsubscribeLetters();
+      unsubscribeEventCoupons();
+      unsubscribeCouponOrders();
+      unsubscribeEventLedger();
     };
   }, []);
 
@@ -1854,6 +2025,102 @@ export default function App() {
           .catch((err) => handleFirestoreError(err, OperationType.WRITE, `app_users/${upU.id}`));
       }
     }
+  };
+
+  const handleSaveEventCoupon = async (eventItem: EventCoupon) => {
+    setEventCoupons(prev => {
+      const idx = prev.findIndex(e => e.id === eventItem.id);
+      if (idx >= 0) {
+        const updated = [...prev];
+        updated[idx] = eventItem;
+        return updated;
+      }
+      return [eventItem, ...prev];
+    });
+    if (isSupabaseConfigured) {
+      await saveEventCoupon(eventItem);
+    } else if (isFirebaseConfigured) {
+      await setDoc(doc(db, 'event_coupons', eventItem.id), sanitizeData(eventItem))
+        .catch(err => handleFirestoreError(err, OperationType.WRITE, `event_coupons/${eventItem.id}`));
+    }
+  };
+
+  const handleDeleteEventCoupon = async (eventId: string) => {
+    setEventCoupons(prev => prev.filter(e => e.id !== eventId));
+    if (isSupabaseConfigured) {
+      await deleteEventCoupon(eventId);
+    } else if (isFirebaseConfigured) {
+      await deleteDoc(doc(db, 'event_coupons', eventId))
+        .catch(err => handleFirestoreError(err, OperationType.DELETE, `event_coupons/${eventId}`));
+    }
+  };
+
+  const handleSaveCouponOrder = async (orderItem: CouponOrder) => {
+    setCouponOrders(prev => {
+      const idx = prev.findIndex(o => o.id === orderItem.id);
+      if (idx >= 0) {
+        const updated = [...prev];
+        updated[idx] = orderItem;
+        return updated;
+      }
+      return [orderItem, ...prev];
+    });
+    if (isSupabaseConfigured) {
+      await saveCouponOrder(orderItem);
+    } else if (isFirebaseConfigured) {
+      await setDoc(doc(db, 'coupon_orders', orderItem.id), sanitizeData(orderItem))
+        .catch(err => handleFirestoreError(err, OperationType.WRITE, `coupon_orders/${orderItem.id}`));
+    }
+  };
+
+  const handleDeleteCouponOrder = async (orderId: string) => {
+    setCouponOrders(prev => prev.filter(o => o.id !== orderId));
+    if (isSupabaseConfigured) {
+      await deleteCouponOrder(orderId);
+    } else if (isFirebaseConfigured) {
+      await deleteDoc(doc(db, 'coupon_orders', orderId))
+        .catch(err => handleFirestoreError(err, OperationType.DELETE, `coupon_orders/${orderId}`));
+    }
+  };
+
+  const handleSaveEventLedgerEntry = async (entry: EventLedgerEntry) => {
+    setEventLedgerList(prev => {
+      const idx = prev.findIndex(l => l.id === entry.id);
+      if (idx >= 0) {
+        const updated = [...prev];
+        updated[idx] = entry;
+        return updated;
+      }
+      return [entry, ...prev];
+    });
+    if (isSupabaseConfigured) {
+      await saveEventLedgerEntry(entry);
+    } else if (isFirebaseConfigured) {
+      await setDoc(doc(db, 'event_ledger', entry.id), sanitizeData(entry))
+        .catch(err => handleFirestoreError(err, OperationType.WRITE, `event_ledger/${entry.id}`));
+    }
+  };
+
+  const handleDeleteEventLedgerEntry = async (entryId: string) => {
+    setEventLedgerList(prev => prev.filter(l => l.id !== entryId));
+    if (isSupabaseConfigured) {
+      await deleteEventLedgerEntry(entryId);
+    } else if (isFirebaseConfigured) {
+      await deleteDoc(doc(db, 'event_ledger', entryId))
+        .catch(err => handleFirestoreError(err, OperationType.DELETE, `event_ledger/${entryId}`));
+    }
+  };
+
+  const handleTransferEventSurplusToRT = async (amount: number, description: string) => {
+    addLedgerEntry({
+      tanggal: new Date().toISOString().split('T')[0],
+      tipe: 'pemasukan',
+      kategori: 'Pemasukan Lain-lain',
+      deskripsi: `${description} (Setoran Hasil Penjualan Kupon / Donasi Acara RT)`,
+      jumlah: amount,
+      sumberKas: 'rtBank',
+      petugas: currentUser?.nama || 'Panitia Acara RT'
+    });
   };
 
   const updateBlocksList = (newBlocks: string[] | ((prev: string[]) => string[])) => {
@@ -2429,6 +2696,27 @@ export default function App() {
             />
           )}
 
+          {activeTab === 'kupon' && (
+            <KuponAcara 
+              currentUser={currentUser}
+              wargaList={wargaList}
+              events={eventCoupons}
+              onSaveEvent={handleSaveEventCoupon}
+              onDeleteEvent={handleDeleteEventCoupon}
+              orders={couponOrders}
+              onSaveOrder={handleSaveCouponOrder}
+              onDeleteOrder={handleDeleteCouponOrder}
+              eventLedger={eventLedgerList}
+              onSaveLedgerEntry={handleSaveEventLedgerEntry}
+              onDeleteLedgerEntry={handleDeleteEventLedgerEntry}
+              onTransferToMainRT={handleTransferEventSurplusToRT}
+              isCouponFeatureEnabled={isCouponFeatureEnabled}
+              onToggleFeature={updateIsCouponFeatureEnabled}
+              rtTitle={rtTitle}
+              rtAddress={rtAddress}
+            />
+          )}
+
           {activeTab === 'panduan' && (
             <UserGuide 
               kas={activeKas}
@@ -2558,6 +2846,26 @@ export default function App() {
               <ClipboardCheck className="w-4 h-4" />
               <span className="hidden sm:inline">Buku Kolektor</span>
               <span className="sm:hidden">Kolektor</span>
+            </button>
+          )}
+
+          {/* Kupon Acara Temporary / Seasonal Button */}
+          {(isCouponFeatureEnabled || (currentUser && currentUser.role === 'admin')) && (
+            <button 
+              onClick={() => setActiveTab('kupon')}
+              className={`flex-1 py-1.5 px-1 sm:py-3 sm:px-2.5 rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-semibold flex flex-col items-center justify-center gap-1 sm:gap-1.5 transition cursor-pointer relative ${
+                activeTab === 'kupon' 
+                  ? 'bg-rose-50 text-rose-600 border border-rose-100' 
+                  : 'text-slate-500 hover:text-slate-850 hover:bg-slate-50'
+              }`}
+              id="tab-kupon"
+            >
+              <Ticket className="w-4 h-4" />
+              <span className="hidden sm:inline">Kupon Acara</span>
+              <span className="sm:hidden">Kupon</span>
+              {!isCouponFeatureEnabled && currentUser?.role === 'admin' && (
+                <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-amber-500 rounded-full" title="Fitur Disembunyikan (Khusus Admin)" />
+              )}
             </button>
           )}
 

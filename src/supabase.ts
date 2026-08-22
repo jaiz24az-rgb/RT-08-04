@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { Balance, LedgerEntry, WargaBill, RombongBill, AppUser, OfficialLetter } from './types';
+import { Balance, LedgerEntry, WargaBill, RombongBill, AppUser, OfficialLetter, EventCoupon, CouponOrder, EventLedgerEntry } from './types';
 import { safeStorage } from './utils/safeStorage';
 import { isFirebaseConfigured } from './firebase';
 
@@ -98,6 +98,7 @@ export function mapGeneralSettingsToClient(dbData: any) {
     bankPenerima: dbData.bank_penerima ? String(dbData.bank_penerima) : undefined,
     bankCatatanVendor: dbData.bank_catatan_vendor ? String(dbData.bank_catatan_vendor) : undefined,
     meetingNotulen: dbData.meeting_notulen ? String(dbData.meeting_notulen) : undefined,
+    isCouponFeatureEnabled: dbData.is_coupon_feature_enabled !== undefined ? Boolean(dbData.is_coupon_feature_enabled) : undefined,
   };
 }
 
@@ -238,6 +239,7 @@ export async function upsertGeneralSettings(settings: Partial<any>) {
     if (settings.bankPenerima !== undefined) dbPayload.bank_penerima = settings.bankPenerima;
     if (settings.bankCatatanVendor !== undefined) dbPayload.bank_catatan_vendor = settings.bankCatatanVendor;
     if (settings.meetingNotulen !== undefined) dbPayload.meeting_notulen = settings.meetingNotulen;
+    if (settings.isCouponFeatureEnabled !== undefined) dbPayload.is_coupon_feature_enabled = settings.isCouponFeatureEnabled;
 
     const { error } = await supabase
       .from('settings')
@@ -519,4 +521,248 @@ export async function deleteOfficialLetter(id: string) {
     handleSupabaseError(err, SupabaseOpType.DELETE, 'official_letters');
   }
 }
+
+// 7. Event Coupons Synchronization
+export function mapEventCouponToClient(row: any): EventCoupon {
+  return {
+    id: row.id,
+    namaAcara: row.nama_acara,
+    deskripsi: row.deskripsi,
+    hargaPerKupon: Number(row.harga_per_kupon),
+    targetKupon: row.target_kupon ? Number(row.target_kupon) : undefined,
+    prefixKupon: row.prefix_kupon || 'KPN-',
+    nomorMulai: row.nomor_mulai ? Number(row.nomor_mulai) : 1,
+    tanggalMulai: row.tanggal_mulai,
+    tanggalSelesai: row.tanggal_selesai,
+    status: row.status || 'aktif',
+    hadiahDoorprize: row.hadiah_doorprize || [],
+    kontakPanitia: row.kontak_panitia || undefined,
+    rekeningPanitia: row.rekening_panitia || undefined,
+    qrisBase64: row.qris_base64 || undefined,
+    qrisNamaFile: row.qris_nama_file || undefined,
+    createdAt: row.created_at_str || row.created_at || '',
+    createdBy: row.created_by || ''
+  };
+}
+
+export async function getEventCoupons(): Promise<EventCoupon[]> {
+  if (!supabase) return [];
+  try {
+    const { data, error } = await supabase
+      .from('event_coupons')
+      .select('*')
+      .order('tanggal_mulai', { ascending: false });
+    if (error) throw error;
+    return (data || []).map(row => mapEventCouponToClient(row));
+  } catch (err) {
+    handleSupabaseError(err, SupabaseOpType.SELECT, 'event_coupons');
+    return [];
+  }
+}
+
+export async function saveEventCoupon(event: EventCoupon) {
+  if (!supabase) return;
+  try {
+    const { error } = await supabase
+      .from('event_coupons')
+      .upsert({
+        id: event.id,
+        nama_acara: event.namaAcara,
+        deskripsi: event.deskripsi,
+        harga_per_kupon: event.hargaPerKupon,
+        target_kupon: event.targetKupon || null,
+        prefix_kupon: event.prefixKupon,
+        nomor_mulai: event.nomorMulai,
+        tanggal_mulai: event.tanggalMulai,
+        tanggal_selesai: event.tanggalSelesai,
+        status: event.status,
+        hadiah_doorprize: event.hadiahDoorprize || [],
+        kontak_panitia: event.kontakPanitia || null,
+        rekening_panitia: event.rekeningPanitia || null,
+        qris_base64: event.qrisBase64 || null,
+        qris_nama_file: event.qrisNamaFile || null,
+        created_at_str: event.createdAt,
+        created_by: event.createdBy
+      });
+    if (error) throw error;
+  } catch (err) {
+    handleSupabaseError(err, SupabaseOpType.UPSERT, 'event_coupons');
+  }
+}
+
+export async function deleteEventCoupon(id: string) {
+  if (!supabase) return;
+  try {
+    const { error } = await supabase
+      .from('event_coupons')
+      .delete()
+      .eq('id', id);
+    if (error) throw error;
+  } catch (err) {
+    handleSupabaseError(err, SupabaseOpType.DELETE, 'event_coupons');
+  }
+}
+
+// 8. Coupon Orders Synchronization
+export function mapCouponOrderToClient(row: any): CouponOrder {
+  return {
+    id: row.id,
+    eventId: row.event_id,
+    wargaId: row.warga_id || undefined,
+    namaPembeli: row.nama_pembeli,
+    blokRumah: row.blok_rumah || undefined,
+    noWa: row.no_wa || undefined,
+    jumlahKupon: Number(row.jumlah_kupon),
+    hargaSatuan: Number(row.harga_satuan),
+    totalBayar: Number(row.total_bayar),
+    nomorKupon: row.nomor_kupon || [],
+    tanggalBeli: row.tanggal_beli,
+    jamBeli: row.jam_beli || undefined,
+    metodeBayar: row.metode_bayar || 'tunai',
+    statusBayar: row.status_bayar || 'lunas',
+    petugas: row.petugas || '',
+    catatan: row.catatan || undefined,
+    fotoBuktiBase64: row.foto_bukti_base64 || undefined,
+    fotoBuktiNamaFile: row.foto_bukti_nama_file || undefined,
+    isPemenang: Boolean(row.is_pemenang),
+    hadiahDimenangkan: row.hadiah_dimenangkan || undefined,
+    nomorKuponMenang: row.nomor_kupon_menang || undefined,
+    createdAt: row.created_at_str || row.created_at || ''
+  };
+}
+
+export async function getCouponOrders(): Promise<CouponOrder[]> {
+  if (!supabase) return [];
+  try {
+    const { data, error } = await supabase
+      .from('coupon_orders')
+      .select('*')
+      .order('tanggal_beli', { ascending: false });
+    if (error) throw error;
+    return (data || []).map(row => mapCouponOrderToClient(row));
+  } catch (err) {
+    handleSupabaseError(err, SupabaseOpType.SELECT, 'coupon_orders');
+    return [];
+  }
+}
+
+export async function saveCouponOrder(order: CouponOrder) {
+  if (!supabase) return;
+  try {
+    const { error } = await supabase
+      .from('coupon_orders')
+      .upsert({
+        id: order.id,
+        event_id: order.eventId,
+        warga_id: order.wargaId || null,
+        nama_pembeli: order.namaPembeli,
+        blok_rumah: order.blokRumah || null,
+        no_wa: order.noWa || null,
+        jumlah_kupon: order.jumlahKupon,
+        harga_satuan: order.hargaSatuan,
+        total_bayar: order.totalBayar,
+        nomor_kupon: order.nomorKupon || [],
+        tanggal_beli: order.tanggalBeli,
+        jam_beli: order.jamBeli || null,
+        metode_bayar: order.metodeBayar,
+        status_bayar: order.statusBayar,
+        petugas: order.petugas,
+        catatan: order.catatan || null,
+        foto_bukti_base64: order.fotoBuktiBase64 || null,
+        foto_bukti_nama_file: order.fotoBuktiNamaFile || null,
+        is_pemenang: order.isPemenang || false,
+        hadiah_dimenangkan: order.hadiahDimenangkan || null,
+        nomor_kupon_menang: order.nomorKuponMenang || null,
+        created_at_str: order.createdAt
+      });
+    if (error) throw error;
+  } catch (err) {
+    handleSupabaseError(err, SupabaseOpType.UPSERT, 'coupon_orders');
+  }
+}
+
+export async function deleteCouponOrder(id: string) {
+  if (!supabase) return;
+  try {
+    const { error } = await supabase
+      .from('coupon_orders')
+      .delete()
+      .eq('id', id);
+    if (error) throw error;
+  } catch (err) {
+    handleSupabaseError(err, SupabaseOpType.DELETE, 'coupon_orders');
+  }
+}
+
+// 9. Event Ledger Synchronization
+export function mapEventLedgerEntryToClient(row: any): EventLedgerEntry {
+  return {
+    id: row.id,
+    eventId: row.event_id,
+    tanggal: row.tanggal,
+    tipe: row.tipe as 'pemasukan' | 'pengeluaran',
+    kategori: row.kategori,
+    deskripsi: row.deskripsi,
+    jumlah: Number(row.jumlah),
+    petugas: row.petugas,
+    orderId: row.order_id || undefined,
+    fotoBase64: row.foto_base64 || undefined,
+    fotoNamaFile: row.foto_nama_file || undefined,
+    createdAt: row.created_at_str || row.created_at || ''
+  };
+}
+
+export async function getEventLedger(): Promise<EventLedgerEntry[]> {
+  if (!supabase) return [];
+  try {
+    const { data, error } = await supabase
+      .from('event_ledger')
+      .select('*')
+      .order('tanggal', { ascending: false });
+    if (error) throw error;
+    return (data || []).map(row => mapEventLedgerEntryToClient(row));
+  } catch (err) {
+    handleSupabaseError(err, SupabaseOpType.SELECT, 'event_ledger');
+    return [];
+  }
+}
+
+export async function saveEventLedgerEntry(entry: EventLedgerEntry) {
+  if (!supabase) return;
+  try {
+    const { error } = await supabase
+      .from('event_ledger')
+      .upsert({
+        id: entry.id,
+        event_id: entry.eventId,
+        tanggal: entry.tanggal,
+        tipe: entry.tipe,
+        kategori: entry.kategori,
+        deskripsi: entry.deskripsi,
+        jumlah: entry.jumlah,
+        petugas: entry.petugas,
+        order_id: entry.orderId || null,
+        foto_base64: entry.fotoBase64 || null,
+        foto_nama_file: entry.fotoNamaFile || null,
+        created_at_str: entry.createdAt
+      });
+    if (error) throw error;
+  } catch (err) {
+    handleSupabaseError(err, SupabaseOpType.UPSERT, 'event_ledger');
+  }
+}
+
+export async function deleteEventLedgerEntry(id: string) {
+  if (!supabase) return;
+  try {
+    const { error } = await supabase
+      .from('event_ledger')
+      .delete()
+      .eq('id', id);
+    if (error) throw error;
+  } catch (err) {
+    handleSupabaseError(err, SupabaseOpType.DELETE, 'event_ledger');
+  }
+}
+
 

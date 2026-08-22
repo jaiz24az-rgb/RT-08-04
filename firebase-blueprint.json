@@ -126,6 +126,69 @@
         "createdBy": { "type": "string" }
       },
       "required": ["id", "nomorSurat", "tanggalSurat", "jenisSurat", "perihal", "penerima", "createdAt", "createdBy"]
+    },
+    "EventCoupon": {
+      "title": "Event Coupon",
+      "description": "Represents an event or temporary coupon program (e.g. 17 Agustus).",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "namaAcara": { "type": "string" },
+        "deskripsi": { "type": "string" },
+        "hargaPerKupon": { "type": "number" },
+        "targetKupon": { "type": "number" },
+        "prefixKupon": { "type": "string" },
+        "nomorMulai": { "type": "number" },
+        "tanggalMulai": { "type": "string" },
+        "tanggalSelesai": { "type": "string" },
+        "status": { "type": "string", "enum": ["aktif", "selesai", "arsip"] },
+        "hadiahDoorprize": { "type": "array" },
+        "kontakPanitia": { "type": "string" },
+        "rekeningPanitia": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "createdBy": { "type": "string" }
+      },
+      "required": ["id", "namaAcara", "hargaPerKupon", "prefixKupon", "tanggalMulai", "tanggalSelesai", "status"]
+    },
+    "CouponOrder": {
+      "title": "Coupon Order",
+      "description": "Represents a citizen purchase of event coupons.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "eventId": { "type": "string" },
+        "wargaId": { "type": "string" },
+        "namaPembeli": { "type": "string" },
+        "blokRumah": { "type": "string" },
+        "noWa": { "type": "string" },
+        "jumlahKupon": { "type": "number" },
+        "hargaSatuan": { "type": "number" },
+        "totalBayar": { "type": "number" },
+        "nomorKupon": { "type": "array" },
+        "tanggalBeli": { "type": "string" },
+        "metodeBayar": { "type": "string", "enum": ["tunai", "transfer", "qris"] },
+        "statusBayar": { "type": "string", "enum": ["lunas", "belum_bayar"] },
+        "petugas": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "eventId", "namaPembeli", "jumlahKupon", "hargaSatuan", "totalBayar", "nomorKupon", "tanggalBeli", "statusBayar"]
+    },
+    "EventLedgerEntry": {
+      "title": "Event Ledger Entry",
+      "description": "Cash transaction specifically for the temporary event, kept strictly separated from main RT kas.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "eventId": { "type": "string" },
+        "tanggal": { "type": "string" },
+        "tipe": { "type": "string", "enum": ["pemasukan", "pengeluaran"] },
+        "kategori": { "type": "string" },
+        "deskripsi": { "type": "string" },
+        "jumlah": { "type": "number" },
+        "petugas": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "eventId", "tanggal", "tipe", "kategori", "deskripsi", "jumlah", "petugas"]
     }
   },
   "firestore": {
@@ -152,6 +215,18 @@
     "official_letters/{letterId}": {
       "schema": "OfficialLetter",
       "description": "Sequence logs of official letters dispatched by the RT."
+    },
+    "event_coupons/{couponId}": {
+      "schema": "EventCoupon",
+      "description": "Event programs for coupon sales."
+    },
+    "coupon_orders/{orderId}": {
+      "schema": "CouponOrder",
+      "description": "Citizen coupon purchase orders."
+    },
+    "event_ledger/{entryId}": {
+      "schema": "EventLedgerEntry",
+      "description": "Segregated cash mutation records for events."
     }
   }
 }
