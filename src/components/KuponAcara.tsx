@@ -7,7 +7,7 @@ import {
   ArrowUpRight, ArrowDownRight, Wallet, Check, AlertTriangle,
   FileSpreadsheet, SlidersHorizontal, ToggleLeft, ToggleRight,
   ExternalLink, Copy, HelpCircle, Download, Image as ImageIcon, Camera, Upload, MessageSquare,
-  Lock, Unlock, Archive, CheckCircle
+  Lock, Unlock, Archive, CheckCircle, UserX, UserCheck, Send, Home
 } from 'lucide-react';
 import { EventCoupon, CouponOrder, EventLedgerEntry, WargaBill, AppUser } from '../types';
 
@@ -60,14 +60,20 @@ export const KuponAcara: React.FC<KuponAcaraProps> = ({
     return list.find(e => e.id === selectedEventId) || list[0] || null;
   }, [events, selectedEventId]);
 
-  // Sub-tabs: 'penjualan' | 'laporan' | 'buku_kas' | 'undian' | 'cetak_massal' | 'pengaturan'
-  const [subTab, setSubTab] = useState<'penjualan' | 'laporan' | 'buku_kas' | 'undian' | 'cetak_massal' | 'pengaturan'>('penjualan');
+  // Sub-tabs: 'penjualan' | 'laporan' | 'belum_beli' | 'buku_kas' | 'undian' | 'cetak_massal' | 'pengaturan'
+  const [subTab, setSubTab] = useState<'penjualan' | 'laporan' | 'belum_beli' | 'buku_kas' | 'undian' | 'cetak_massal' | 'pengaturan'>('penjualan');
 
   // Filters & Search for Orders
   const [searchKeyword, setSearchKeyword] = useState('');
   const [filterStatus, setFilterStatus] = useState<'semua' | 'lunas' | 'belum_bayar'>('semua');
   const [filterBlok, setFilterBlok] = useState<string>('semua');
   const [reportSortBy, setReportSortBy] = useState<'terbaru' | 'terbanyak' | 'nama' | 'nominal'>('terbanyak');
+
+  // Filters & Search for Warga Belum Beli Kupon
+  const [searchUnboughtKeyword, setSearchUnboughtKeyword] = useState('');
+  const [filterUnboughtBlok, setFilterUnboughtBlok] = useState<string>('semua');
+  const [filterUnboughtStatusRumah, setFilterUnboughtStatusRumah] = useState<string>('semua');
+  const [sortUnboughtBy, setSortUnboughtBy] = useState<'blok' | 'nama'>('blok');
 
   // Modals state
   const [showOrderModal, setShowOrderModal] = useState(false);
@@ -336,6 +342,133 @@ export const KuponAcara: React.FC<KuponAcaraProps> = ({
     };
   }, [eventOrders, searchKeyword, filterStatus, filterBlok, reportSortBy]);
 
+  // Active Residents in RT (not deleted & not non-active)
+  const activeWargaList = useMemo(() => {
+    return (wargaList || []).filter(w => !w.isDeleted && w.statusKeaktifan !== 'nonaktif');
+  }, [wargaList]);
+
+  // Unique Blocks in RT for filtering
+  const uniqueBlocks = useMemo(() => {
+    const blocks = new Set<string>();
+    activeWargaList.forEach(w => {
+      if (w.blok) blocks.add(w.blok.trim());
+    });
+    return Array.from(blocks).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  }, [activeWargaList]);
+
+  // Analysis of Residents who have bought vs NOT bought coupons for the active event
+  const wargaCouponAnalysis = useMemo(() => {
+    const boughtMap = new Map<string, { totalKupon: number; totalNominal: number; orders: CouponOrder[] }>();
+
+    // Scan all orders for active event
+    eventOrders.forEach(order => {
+      // 1. Direct wargaId match
+      if (order.wargaId) {
+        const existing = boughtMap.get(order.wargaId) || { totalKupon: 0, totalNominal: 0, orders: [] };
+        existing.totalKupon += order.jumlahKupon;
+        existing.totalNominal += order.totalBayar;
+        existing.orders.push(order);
+        boughtMap.set(order.wargaId, existing);
+      } else {
+        // 2. Fallback match by Name and/or Blok
+        const orderBlokClean = (order.blokRumah || '').toLowerCase().replace(/[\s\/\-_]/g, '');
+        const orderNameClean = order.namaPembeli.trim().toLowerCase();
+
+        const matchedWarga = activeWargaList.find(w => {
+          const wBlokClean = `${w.blok}${w.noRumah}`.toLowerCase().replace(/[\s\/\-_]/g, '');
+          const wNameClean = w.nama.trim().toLowerCase();
+          
+          if (wNameClean === orderNameClean) return true;
+          if (orderBlokClean && (orderBlokClean === wBlokClean || orderBlokClean.includes(wBlokClean))) {
+            return true;
+          }
+          return false;
+        });
+
+        if (matchedWarga) {
+          const existing = boughtMap.get(matchedWarga.id) || { totalKupon: 0, totalNominal: 0, orders: [] };
+          existing.totalKupon += order.jumlahKupon;
+          existing.totalNominal += order.totalBayar;
+          existing.orders.push(order);
+          boughtMap.set(matchedWarga.id, existing);
+        }
+      }
+    });
+
+    const sudahBeli: Array<{ warga: WargaBill; totalKupon: number; totalNominal: number; orders: CouponOrder[] }> = [];
+    const belumBeli: Array<WargaBill> = [];
+
+    activeWargaList.forEach(w => {
+      if (boughtMap.has(w.id)) {
+        const info = boughtMap.get(w.id)!;
+        sudahBeli.push({ warga: w, totalKupon: info.totalKupon, totalNominal: info.totalNominal, orders: info.orders });
+      } else {
+        belumBeli.push(w);
+      }
+    });
+
+    // Total metrics
+    const totalWarga = activeWargaList.length;
+    const totalSudahBeli = sudahBeli.length;
+    const totalBelumBeli = belumBeli.length;
+    const persenPartisipasi = totalWarga > 0 ? Math.round((totalSudahBeli / totalWarga) * 100) : 0;
+    const hargaKupon = activeEvent?.hargaPerKupon || 5000;
+    const potensiKupon = totalBelumBeli * 2; // Estimasi 2 kupon per KK
+    const potensiNominal = potensiKupon * hargaKupon;
+
+    return {
+      activeWargaList,
+      sudahBeli,
+      belumBeli,
+      totalWarga,
+      totalSudahBeli,
+      totalBelumBeli,
+      persenPartisipasi,
+      potensiKupon,
+      potensiNominal
+    };
+  }, [activeWargaList, eventOrders, activeEvent]);
+
+  // Filtered Unbought Residents based on UI filters
+  const filteredUnboughtWarga = useMemo(() => {
+    let list = [...wargaCouponAnalysis.belumBeli];
+
+    // Keyword filter
+    if (searchUnboughtKeyword.trim()) {
+      const q = searchUnboughtKeyword.toLowerCase();
+      list = list.filter(w => 
+        w.nama.toLowerCase().includes(q) ||
+        w.blok.toLowerCase().includes(q) ||
+        w.noRumah.toLowerCase().includes(q) ||
+        `${w.blok}/${w.noRumah}`.toLowerCase().includes(q) ||
+        (w.noWa && w.noWa.includes(q))
+      );
+    }
+
+    // Blok filter
+    if (filterUnboughtBlok !== 'semua') {
+      list = list.filter(w => w.blok === filterUnboughtBlok);
+    }
+
+    // Status Rumah filter
+    if (filterUnboughtStatusRumah !== 'semua') {
+      list = list.filter(w => (w.statusRumah || 'milik_sendiri') === filterUnboughtStatusRumah);
+    }
+
+    // Sort
+    list.sort((a, b) => {
+      if (sortUnboughtBy === 'nama') {
+        return a.nama.localeCompare(b.nama);
+      }
+      // default: blok & no rumah
+      const blokComp = a.blok.localeCompare(b.blok, undefined, { numeric: true });
+      if (blokComp !== 0) return blokComp;
+      return a.noRumah.localeCompare(b.noRumah, undefined, { numeric: true });
+    });
+
+    return list;
+  }, [wargaCouponAnalysis.belumBeli, searchUnboughtKeyword, filterUnboughtBlok, filterUnboughtStatusRumah, sortUnboughtBy]);
+
   // Generate next sequential coupon numbers
   const generateCouponNumbers = (qty: number): string[] => {
     if (!activeEvent) return [];
@@ -360,7 +493,7 @@ export const KuponAcara: React.FC<KuponAcaraProps> = ({
     return newNumbers;
   };
 
-  // Open New Order Modal
+  // Open New Order Modal (General)
   const handleOpenNewOrder = () => {
     setEditingOrder(null);
     setOrderBuyerType('warga');
@@ -377,6 +510,78 @@ export const KuponAcara: React.FC<KuponAcaraProps> = ({
     setOrderFotoBuktiNama('');
     setOrderPetugas(currentUser?.nama || 'Panitia');
     setShowOrderModal(true);
+  };
+
+  // Open New Order Modal directly for a specific Warga
+  const handleOpenNewOrderForWarga = (w: WargaBill) => {
+    setEditingOrder(null);
+    setOrderBuyerType('warga');
+    setOrderWargaId(w.id);
+    setOrderBuyerName(w.nama);
+    setOrderBlokRumah(`${w.blok}/${w.noRumah}`);
+    setOrderNoWa(w.noWa || '');
+    setOrderQty(1);
+    setOrderPriceCustom(activeEvent?.hargaPerKupon || 5000);
+    setOrderPaymentMethod('tunai');
+    setOrderPaymentStatus('lunas');
+    setOrderNotes('');
+    setOrderFotoBukti('');
+    setOrderFotoBuktiNama('');
+    setOrderPetugas(currentUser?.nama || 'Panitia');
+    setShowOrderModal(true);
+  };
+
+  // Send WhatsApp Invitation/Reminder to Warga
+  const handleSendReminderWA = (w: WargaBill) => {
+    const phone = (w.noWa || '').replace(/[^0-9]/g, '');
+    const priceStr = (activeEvent?.hargaPerKupon || 5000).toLocaleString('id-ID');
+    const prizesStr = (activeEvent?.hadiahDoorprize && activeEvent.hadiahDoorprize.length > 0)
+      ? activeEvent.hadiahDoorprize.slice(0, 4).join(', ')
+      : 'Kulkas, Sepeda, TV & Aneka Hadiah Menarik';
+
+    const lines = [
+      `Assalamu'alaikum / Halo Bapak/Ibu *${w.nama}* (Rumah *${w.blok}/${w.noRumah}*),`,
+      ``,
+      `Semoga selalu sehat dan lancar rezekinya. Kami dari Panitia *${activeEvent?.namaAcara || 'Kupon Doorprize'}* ${rtTitle ? `*${rtTitle}*` : ''} menginfokan bahwa penjualan kupon doorprize masih dibuka.`,
+      ``,
+      `🎟️ *Harga Kupon:* Rp ${priceStr} / lembar`,
+      `🎁 *Hadiah Utama:* ${prizesStr}`,
+      activeEvent?.rekeningPanitia ? `💳 *Pembayaran / Transfer:* ${activeEvent.rekeningPanitia}` : `💳 *Pembayaran:* Tunai via Panitia / Kolektor RT`,
+      ``,
+      `Mari bersama-sama meramaikan acara lingkungan kita! Partisipasi Bapak/Ibu sangat berarti bagi kesuksesan dan kerukunan warga.`,
+      ``,
+      `Bapak/Ibu bisa langsung memesan atau titip kupon dengan membalas pesan WhatsApp ini ya. Terima kasih banyak! 🙏✨`,
+      ``,
+      `_Salam Hangat, Panitia ${activeEvent?.namaAcara || 'Acara RT'}_`
+    ];
+
+    const fullMsg = lines.join('\n');
+    if (phone) {
+      const formattedPhone = phone.startsWith('0') ? '62' + phone.substring(1) : phone;
+      window.open(`https://wa.me/${formattedPhone}?text=${encodeURIComponent(fullMsg)}`, '_blank');
+    } else {
+      window.open(`https://wa.me/?text=${encodeURIComponent(fullMsg)}`, '_blank');
+    }
+  };
+
+  // Share entire unbought list to Panitia / Kolektor WA
+  const handleShareUnboughtToPanitiaWA = (unboughtList: WargaBill[]) => {
+    const lines = [
+      `📋 *DAFTAR WARGA BELUM BELI KUPON ${activeEvent?.namaAcara.toUpperCase() || 'ACARA RT'}*`,
+      `📍 *${rtTitle || 'Pengurus RT'}*`,
+      `📅 Per: ${new Date().toLocaleDateString('id-ID', { dateStyle: 'long' })}`,
+      `━━━━━━━━━━━━━━━━━━━━━━`,
+      `👥 Total Belum Beli: *${unboughtList.length} Warga / KK*`,
+      `🎟️ Target Kupon: Rp ${(activeEvent?.hargaPerKupon || 5000).toLocaleString('id-ID')}/lembar`,
+      `━━━━━━━━━━━━━━━━━━━━━━`,
+      `*RINCIAN WARGA (PER BLOK & RUMAH):*`,
+      ...unboughtList.map((w, idx) => 
+        `${idx + 1}. *${w.blok}/${w.noRumah}* - ${w.nama} ${w.noWa ? `(WA: ${w.noWa})` : '(Belum ada WA)'}`
+      ),
+      `━━━━━━━━━━━━━━━━━━━━━━`,
+      `_Mohon bantuan panitia dan kolektor RT untuk silaturahmi & penawaran kupon doorprize door-to-door. Terima kasih!_`
+    ];
+    window.open(`https://wa.me/?text=${encodeURIComponent(lines.join('\n'))}`, '_blank');
   };
 
   // Open Edit Order Modal
@@ -874,6 +1079,50 @@ Salam Hangat,
 
       </div>
 
+      {/* 2.5 STATUS PARTISIPASI WARGA RT (CEK SUDAH VS BELUM BELI) */}
+      <div className="bg-gradient-to-r from-red-50 via-amber-50 to-orange-50 border border-amber-200/80 rounded-2xl p-3.5 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 bg-amber-500 text-white rounded-xl shadow-xs shrink-0">
+            <UserX className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h4 className="font-extrabold text-xs sm:text-sm text-slate-900">
+                Partisipasi Warga RT: {wargaCouponAnalysis.totalSudahBeli} dari {wargaCouponAnalysis.totalWarga} Rumah ({wargaCouponAnalysis.persenPartisipasi}%)
+              </h4>
+              {wargaCouponAnalysis.totalBelumBeli > 0 ? (
+                <span className="px-2 py-0.5 bg-red-100 text-red-800 text-[10px] font-extrabold rounded-full animate-pulse">
+                  {wargaCouponAnalysis.totalBelumBeli} Rumah Belum Beli
+                </span>
+              ) : (
+                <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 text-[10px] font-extrabold rounded-full flex items-center gap-1">
+                  <CheckCircle className="w-3 h-3" /> 100% Partisipasi
+                </span>
+              )}
+            </div>
+            <p className="text-[11px] text-slate-600 mt-0.5">
+              {wargaCouponAnalysis.totalBelumBeli > 0 
+                ? `Masih ada ${wargaCouponAnalysis.totalBelumBeli} warga RT yang belum memesan kupon doorprize acara ini.`
+                : 'Seluruh warga RT terdaftar telah ikut berpartisipasi membeli kupon doorprize!'}
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setSubTab('belum_beli')}
+          className={`px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-1.5 transition cursor-pointer shrink-0 shadow-xs ${
+            subTab === 'belum_beli'
+              ? 'bg-red-600 text-white'
+              : 'bg-white hover:bg-slate-50 text-slate-900 border border-slate-200'
+          }`}
+        >
+          <UserX className="w-3.5 h-3.5 text-red-600" />
+          <span>Cek Warga Belum Beli ({wargaCouponAnalysis.totalBelumBeli})</span>
+          <ChevronRight className="w-3.5 h-3.5" />
+        </button>
+      </div>
+
       {/* 3. NAVIGATION TABS */}
       <div className="flex items-center justify-between gap-2 border-b border-slate-200 pb-2 overflow-x-auto">
         <div className="flex items-center gap-1.5 min-w-max">
@@ -902,6 +1151,26 @@ Salam Hangat,
           >
             <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
             <span>Laporan Pembeli &amp; Nominal ({reportData.totalPembeliUnik})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setSubTab('belum_beli')}
+            className={`px-4 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition cursor-pointer ${
+              subTab === 'belum_beli'
+                ? 'bg-red-600 text-white shadow-xs'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+            }`}
+          >
+            <UserX className="w-4 h-4 text-amber-500" />
+            <span>Belum Beli Kupon</span>
+            {wargaCouponAnalysis.totalBelumBeli > 0 && (
+              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-black ${
+                subTab === 'belum_beli' ? 'bg-white text-red-600' : 'bg-red-500 text-white'
+              }`}>
+                {wargaCouponAnalysis.totalBelumBeli}
+              </span>
+            )}
           </button>
 
           <button
@@ -1246,6 +1515,34 @@ Salam Hangat,
       {subTab === 'laporan' && (
         <div className="space-y-4">
           
+          {/* Quick Notice to check non-buyers */}
+          {wargaCouponAnalysis.totalBelumBeli > 0 && (
+            <div className="bg-amber-50 border border-amber-200/80 rounded-2xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-amber-500 text-white rounded-xl shrink-0">
+                  <UserX className="w-4 h-4" />
+                </div>
+                <div>
+                  <p className="font-extrabold text-amber-950">
+                    Masih ada {wargaCouponAnalysis.totalBelumBeli} warga RT yang belum membeli kupon ({wargaCouponAnalysis.persenPartisipasi}% sudah beli)
+                  </p>
+                  <p className="text-amber-800 text-[11px] mt-0.5">
+                    Gunakan tab "Belum Beli Kupon" untuk melihat nama dan blok warga yang belum berpartisipasi serta follow-up via WhatsApp.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setSubTab('belum_beli')}
+                className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-xs rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer shrink-0"
+              >
+                <span>Lihat {wargaCouponAnalysis.totalBelumBeli} Warga Belum Beli</span>
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
           {/* Header & Quick Summary Cards */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
             <div className="bg-white border border-slate-200 rounded-2xl p-3.5 shadow-xs">
@@ -1524,6 +1821,333 @@ Salam Hangat,
                 </table>
               </div>
             )}
+          </div>
+
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 4.6. TAB: WARGA BELUM BELI KUPON (CHECK & FOLLOW-UP WARGA RT) */}
+      {/* ========================================================================= */}
+      {subTab === 'belum_beli' && (
+        <div className="space-y-4">
+          
+          {/* Header & Quick Metric Summary */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
+            
+            {/* Total Warga RT */}
+            <div className="bg-white border border-slate-200 rounded-2xl p-3.5 shadow-xs">
+              <span className="text-[11px] font-bold text-slate-500 uppercase">Total Warga RT</span>
+              <div className="text-xl font-black text-slate-900 mt-0.5">
+                {wargaCouponAnalysis.totalWarga} <span className="text-xs font-normal text-slate-500">Rumah / KK</span>
+              </div>
+              <p className="text-[10px] text-slate-400 mt-0.5">Warga aktif terdata di buku warga</p>
+            </div>
+
+            {/* Belum Beli Kupon */}
+            <div className="bg-gradient-to-br from-red-50 to-orange-50/60 border border-red-200 rounded-2xl p-3.5 shadow-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-red-700 uppercase">Belum Beli Kupon</span>
+                <span className="text-[10px] font-extrabold bg-red-200 text-red-900 px-2 py-0.5 rounded-md">
+                  {wargaCouponAnalysis.totalWarga > 0 
+                    ? `${Math.round((wargaCouponAnalysis.totalBelumBeli / wargaCouponAnalysis.totalWarga) * 100)}%` 
+                    : '0%'}
+                </span>
+              </div>
+              <div className="text-xl font-black text-red-700 mt-0.5">
+                {wargaCouponAnalysis.totalBelumBeli} <span className="text-xs font-bold text-red-600">Rumah / KK</span>
+              </div>
+              <p className="text-[10px] text-red-700 mt-0.5">Perlu follow-up / penawaran</p>
+            </div>
+
+            {/* Sudah Beli Kupon */}
+            <div className="bg-white border border-slate-200 rounded-2xl p-3.5 shadow-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-slate-500 uppercase">Sudah Beli Kupon</span>
+                <span className="text-[10px] font-extrabold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-md">
+                  {wargaCouponAnalysis.persenPartisipasi}% Partisipasi
+                </span>
+              </div>
+              <div className="text-xl font-black text-emerald-600 mt-0.5">
+                {wargaCouponAnalysis.totalSudahBeli} <span className="text-xs font-normal text-slate-500">Rumah / KK</span>
+              </div>
+              <p className="text-[10px] text-emerald-700 font-semibold mt-0.5">Sudah pesan kupon doorprize</p>
+            </div>
+
+            {/* Potensi Kas Tambahan */}
+            <div className="bg-white border border-slate-200 rounded-2xl p-3.5 shadow-xs">
+              <span className="text-[11px] font-bold text-slate-500 uppercase">Potensi Tambahan Kas</span>
+              <div className="text-xl font-black text-amber-600 mt-0.5">
+                Rp {wargaCouponAnalysis.potensiNominal.toLocaleString('id-ID')}
+              </div>
+              <p className="text-[10px] text-slate-400 mt-0.5">
+                Jika {wargaCouponAnalysis.totalBelumBeli} KK beli min. 2 kupon (@ Rp {(activeEvent?.hargaPerKupon || 5000).toLocaleString('id-ID')})
+              </p>
+            </div>
+
+          </div>
+
+          {/* Filter & Action Toolbar */}
+          <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+            <div className="flex flex-1 flex-wrap items-center gap-2">
+              
+              {/* Search Bar */}
+              <div className="relative flex-1 min-w-[200px]">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Cari nama warga, blok/no rumah, WA..."
+                  value={searchUnboughtKeyword}
+                  onChange={(e) => setSearchUnboughtKeyword(e.target.value)}
+                  className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:bg-white focus:outline-none focus:ring-2 focus:ring-red-500 transition"
+                />
+              </div>
+
+              {/* Filter Blok */}
+              <select
+                value={filterUnboughtBlok}
+                onChange={(e) => setFilterUnboughtBlok(e.target.value)}
+                className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-red-500 cursor-pointer"
+              >
+                <option value="semua">Semua Blok ({uniqueBlocks.length} Blok)</option>
+                {uniqueBlocks.map(b => (
+                  <option key={b} value={b}>Blok {b}</option>
+                ))}
+              </select>
+
+              {/* Filter Status Rumah */}
+              <select
+                value={filterUnboughtStatusRumah}
+                onChange={(e) => setFilterUnboughtStatusRumah(e.target.value)}
+                className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-red-500 cursor-pointer"
+              >
+                <option value="semua">Semua Status Rumah</option>
+                <option value="milik_sendiri">Milik Sendiri</option>
+                <option value="sewa_kontrak">Sewa / Kontrak</option>
+              </select>
+
+              {/* Sort selector */}
+              <select
+                value={sortUnboughtBy}
+                onChange={(e) => setSortUnboughtBy(e.target.value as any)}
+                className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-red-500 cursor-pointer"
+              >
+                <option value="blok">Urut: Blok &amp; No Rumah</option>
+                <option value="nama">Urut: Nama Warga (A-Z)</option>
+              </select>
+
+            </div>
+
+            {/* Action buttons: Broadcast WhatsApp & Print Door-to-Door sheet */}
+            <div className="flex items-center gap-2 shrink-0">
+              
+              <button
+                type="button"
+                onClick={() => handleShareUnboughtToPanitiaWA(filteredUnboughtWarga)}
+                disabled={filteredUnboughtWarga.length === 0}
+                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-extrabold text-xs rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+                title="Kirim Daftar Warga Belum Beli ke WhatsApp Panitia / Kolektor Blok"
+              >
+                <Share2 className="w-3.5 h-3.5" />
+                <span>Bagikan Rekap ke WA Panitia</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="px-3.5 py-2 bg-slate-800 hover:bg-slate-900 text-white font-extrabold text-xs rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+                title="Cetak Lembar Checklist Kunjungan Panitia"
+              >
+                <Printer className="w-3.5 h-3.5" />
+                <span>Cetak Lembar Kunjungan</span>
+              </button>
+
+            </div>
+          </div>
+
+          {/* Table of Unbought Residents */}
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden print:border-none print:shadow-none">
+            
+            {/* Header info */}
+            <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h4 className="font-extrabold text-sm text-slate-900 flex items-center gap-2">
+                  <UserX className="w-4 h-4 text-red-600" />
+                  <span>Daftar Warga RT Belum Beli Kupon ({filteredUnboughtWarga.length} Rumah / KK)</span>
+                </h4>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Daftar warga aktif RT yang belum terdata melakukan pemesanan kupon acara <strong>{activeEvent?.namaAcara}</strong>.
+                </p>
+              </div>
+
+              {filteredUnboughtWarga.length > 0 && (
+                <div className="text-right">
+                  <span className="text-[11px] font-bold text-slate-500">Harga Kupon: </span>
+                  <span className="text-xs font-extrabold text-red-600">
+                    Rp {(activeEvent?.hargaPerKupon || 5000).toLocaleString('id-ID')} / lembar
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {filteredUnboughtWarga.length === 0 ? (
+              <div className="p-12 text-center space-y-3">
+                {wargaCouponAnalysis.totalBelumBeli === 0 ? (
+                  <div className="max-w-md mx-auto space-y-2">
+                    <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto text-xl">
+                      🎉
+                    </div>
+                    <h4 className="font-extrabold text-sm text-emerald-950">
+                      Luar Biasa! 100% Warga RT Telah Membeli Kupon
+                    </h4>
+                    <p className="text-xs text-slate-500">
+                      Seluruh {wargaCouponAnalysis.totalWarga} rumah / KK terdaftar di RT telah berpartisipasi membeli kupon doorprize acara ini.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-1 text-slate-400">
+                    <p className="text-xs font-bold text-slate-600">Tidak ada data warga yang sesuai dengan filter pencarian.</p>
+                    <p className="text-[11px] text-slate-400">Silakan ubah kata kunci pencarian atau ganti filter blok.</p>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-100/80 text-slate-700 font-bold border-b border-slate-200">
+                    <tr>
+                      <th className="py-3 px-3.5 text-center w-12">No</th>
+                      <th className="py-3 px-4">Blok / No Rumah</th>
+                      <th className="py-3 px-4">Nama Kepala Keluarga</th>
+                      <th className="py-3 px-4">Status Rumah</th>
+                      <th className="py-3 px-4">Kontak WhatsApp</th>
+                      <th className="py-3 px-4 text-center print:table-cell hidden sm:table-cell">Target Min.</th>
+                      <th className="py-3 px-3.5 text-center print:hidden">Aksi Follow-Up</th>
+                      <th className="py-3 px-4 text-center hidden print:table-cell">Checklist / TTD Warga</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {filteredUnboughtWarga.map((warga, idx) => (
+                      <tr key={warga.id} className="hover:bg-slate-50/80 transition">
+                        
+                        {/* No */}
+                        <td className="py-3 px-3.5 text-center font-bold text-slate-400">
+                          {idx + 1}
+                        </td>
+
+                        {/* Blok & No Rumah */}
+                        <td className="py-3 px-4">
+                          <span className="font-extrabold text-slate-900 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-lg text-xs">
+                            {warga.blok}/{warga.noRumah}
+                          </span>
+                        </td>
+
+                        {/* Nama Warga */}
+                        <td className="py-3 px-4">
+                          <div className="font-extrabold text-slate-900 text-xs flex items-center gap-1.5">
+                            <span>{warga.nama}</span>
+                          </div>
+                        </td>
+
+                        {/* Status Rumah */}
+                        <td className="py-3 px-4">
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                            warga.statusRumah === 'sewa_kontrak'
+                              ? 'bg-purple-50 text-purple-700 border border-purple-200'
+                              : 'bg-slate-100 text-slate-700'
+                          }`}>
+                            {warga.statusRumah === 'sewa_kontrak' ? 'Sewa / Kontrak' : 'Milik Sendiri'}
+                          </span>
+                        </td>
+
+                        {/* Kontak WA */}
+                        <td className="py-3 px-4">
+                          {warga.noWa ? (
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-slate-700 font-mono text-[11px]">{warga.noWa}</span>
+                              <button
+                                type="button"
+                                onClick={() => handleSendReminderWA(warga)}
+                                className="p-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-md transition cursor-pointer print:hidden"
+                                title="Buka Chat WhatsApp"
+                              >
+                                <MessageSquare className="w-3 h-3" />
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="text-[10px] text-slate-400 italic">Belum ada no WA</span>
+                          )}
+                        </td>
+
+                        {/* Target Min (2 Kupon) */}
+                        <td className="py-3 px-4 text-center hidden sm:table-cell">
+                          <span className="text-slate-600 font-semibold text-[11px]">
+                            2 Kupon (Rp {( (activeEvent?.hargaPerKupon || 5000) * 2 ).toLocaleString('id-ID')})
+                          </span>
+                        </td>
+
+                        {/* Aksi Follow-Up (Web view) */}
+                        <td className="py-3 px-3.5 text-center print:hidden">
+                          <div className="flex items-center justify-center gap-1.5">
+                            
+                            {/* Tombol Catat / Beli Kupon */}
+                            <button
+                              type="button"
+                              onClick={() => handleOpenNewOrderForWarga(warga)}
+                              className="px-2.5 py-1.5 bg-red-600 hover:bg-red-700 text-white font-extrabold text-[11px] rounded-lg shadow-xs transition flex items-center gap-1 cursor-pointer active:scale-95"
+                              title={`Catat Pembelian Kupon untuk ${warga.nama}`}
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                              <span>Beli Kupon</span>
+                            </button>
+
+                            {/* Tombol Kirim WA Penawaran */}
+                            <button
+                              type="button"
+                              onClick={() => handleSendReminderWA(warga)}
+                              className={`p-1.5 rounded-lg transition cursor-pointer flex items-center gap-1 text-[11px] font-bold ${
+                                warga.noWa
+                                  ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800'
+                                  : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                              }`}
+                              title={`Kirim Pesan Penawaran Kupon ke WhatsApp ${warga.nama}`}
+                            >
+                              <Send className="w-3.5 h-3.5 text-emerald-600" />
+                              <span className="hidden md:inline">Kirim WA</span>
+                            </button>
+
+                          </div>
+                        </td>
+
+                        {/* Printable Column for Door-to-Door rounds */}
+                        <td className="py-3 px-4 text-center hidden print:table-cell border-l border-slate-200">
+                          <div className="h-6 border-b border-dashed border-slate-300 flex items-center justify-center text-[9px] text-slate-400">
+                            [ &nbsp; &nbsp; &nbsp; &nbsp; Lembar / Rp &nbsp; &nbsp; &nbsp; &nbsp; ]
+                          </div>
+                        </td>
+
+                      </tr>
+                    ))}
+                  </tbody>
+
+                  {/* Table Footer */}
+                  <tfoot className="bg-slate-100 font-extrabold text-slate-900 border-t-2 border-slate-300">
+                    <tr>
+                      <td colSpan={2} className="py-3 px-4 text-left">
+                        TOTAL BELUM BELI:
+                      </td>
+                      <td colSpan={2} className="py-3 px-4 text-red-700 font-black">
+                        {filteredUnboughtWarga.length} Rumah / KK
+                      </td>
+                      <td colSpan={4} className="py-3 px-4 text-[11px] text-slate-600 text-right">
+                        Potensi Kas Masuk: <strong>Rp {(filteredUnboughtWarga.length * 2 * (activeEvent?.hargaPerKupon || 5000)).toLocaleString('id-ID')}</strong> (asumsi 2 kupon/KK)
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
+
           </div>
 
         </div>
