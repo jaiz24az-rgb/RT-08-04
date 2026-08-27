@@ -1050,21 +1050,95 @@ export default function Ledger({
     return matchesSearch && matchesType && matchesCategory && matchesDate;
   });
 
+  // Universal helper to detect internal non-operational transfers (mutasi bank, petty cash transfer, alokasi dana, etc.)
+  const isInternalMutationOrTransfer = (e: any): boolean => {
+    if (!e) return false;
+    const orig = ((e.originalKategori || e.kategori) || '').toLowerCase().trim();
+    const cat = (e.kategori || '').toLowerCase().trim();
+    const desc = (e.deskripsi || '').toLowerCase().trim();
+
+    // 1. Exact Category / Tag Match
+    if (
+      orig === 'setor bank' ||
+      orig === 'mutasi bank-petty' ||
+      orig === 'mutasi bank-kas' ||
+      orig === 'mutasi kas' ||
+      orig === 'transfer kas' ||
+      orig === 'penarikan dana kolektor' ||
+      orig === 'penyesuaian saldo' ||
+      cat === 'setor bank' ||
+      cat === 'mutasi bank-petty' ||
+      cat === 'mutasi bank-kas' ||
+      cat === 'mutasi kas' ||
+      cat === 'transfer kas' ||
+      cat === 'penarikan dana kolektor' ||
+      cat === 'penyesuaian saldo'
+    ) {
+      return true;
+    }
+
+    // 2. Keyword Match in Category
+    if (
+      orig.includes('mutasi') ||
+      orig.includes('setor bank') ||
+      orig.includes('pemindahbukuan') ||
+      orig.includes('penarikan dana kolektor') ||
+      orig.includes('alokasi dana') ||
+      cat.includes('mutasi') ||
+      cat.includes('setor bank') ||
+      cat.includes('pemindahbukuan') ||
+      cat.includes('penarikan dana kolektor') ||
+      cat.includes('alokasi dana')
+    ) {
+      return true;
+    }
+
+    // 3. Keyword Match in Description (all variants of petty cash, bank, and cash transfers)
+    if (
+      desc.includes('mutasi') ||
+      desc.includes('setor bank') ||
+      desc.includes('pemindahbukuan') ||
+      desc.includes('penarikan dana kolektor') ||
+      desc.includes('alokasi dana') ||
+      desc.includes('pengembalian dana') ||
+      desc.includes('petty cash ke') ||
+      desc.includes('ke petty cash') ||
+      desc.includes('petty ke') ||
+      desc.includes('ke petty') ||
+      desc.includes('kas kecil ke') ||
+      desc.includes('ke kas kecil') ||
+      desc.includes('dari kas kecil') ||
+      desc.includes('dari petty cash') ||
+      desc.includes('isi kas kecil') ||
+      desc.includes('mengisi kas kecil') ||
+      desc.includes('pengisian kas kecil') ||
+      desc.includes('tarik kas bank') ||
+      desc.includes('tarik dari bank') ||
+      desc.includes('penyetoran sisa') ||
+      desc.includes('penyesuaian saldo') ||
+      desc.includes('saldo opname') ||
+      desc.includes('transfer kas') ||
+      desc.includes('transfer antar') ||
+      desc.includes('pindah kas') ||
+      desc.includes('pindah dana')
+    ) {
+      return true;
+    }
+
+    return false;
+  };
+
   const totalPemasukan = filteredLedger
     .filter(e => 
       e.tipe === 'pemasukan' && 
-      (e as any).originalKategori !== 'Setor Bank' && 
-      (e as any).originalKategori !== 'Mutasi Bank-Petty' && 
-      (e as any).originalKategori !== 'Penarikan Dana Kolektor'
+      !isInternalMutationOrTransfer(e)
     )
     .reduce((sum, e) => sum + e.jumlah, 0);
 
   const totalPengeluaran = filteredLedger
     .filter(e => 
       e.tipe === 'pengeluaran' && 
-      (e as any).originalKategori !== 'Setor Bank' && 
-      (e as any).originalKategori !== 'Mutasi Bank-Petty' && 
-      (e as any).originalKategori !== 'Penarikan Dana Kolektor'
+      !isInternalMutationOrTransfer(e)
     )
     .reduce((sum, e) => sum + e.jumlah, 0);
 
@@ -1093,50 +1167,55 @@ export default function Ledger({
       return matchesDate;
     });
 
-    const isMutasi = (e: any) => {
-      const orig = (e.originalKategori || '').toLowerCase();
-      const desc = (e.deskripsi || '').toLowerCase();
-      return (
-        orig === 'setor bank' ||
-        orig === 'mutasi bank-petty' ||
-        orig === 'mutasi bank-kas' ||
-        orig === 'penarikan dana kolektor' ||
-        desc.includes('mutasi bank') ||
-        desc.includes('setor bank') ||
-        desc.includes('penarikan dana kolektor')
-      );
-    };
+    // Kas RT = 'Kas Umum RT' or 'Petty Kas' or source is rtTunai / rtPettyCash / rtBank
+    const rtEntries = dateFiltered.filter(e => {
+      const src = e.sumberKas;
+      if (src === 'rtTunai' || src === 'rtPettyCash' || src === 'rtBank') return true;
+      if (src === 'rombongTunai' || src === 'rombongBank') return false;
+      return e.kategori === 'Kas Umum RT' || e.kategori === 'Petty Kas';
+    });
 
-    // Kas RT = 'Kas Umum RT' or 'Petty Kas'
-    const rtEntries = dateFiltered.filter(e => e.kategori === 'Kas Umum RT' || e.kategori === 'Petty Kas');
-    // Kas Rombong = 'Kas Rombong'
-    const rbEntries = dateFiltered.filter(e => e.kategori === 'Kas Rombong');
+    // Kas Rombong = 'Kas Rombong' or source is rombongTunai / rombongBank
+    const rbEntries = dateFiltered.filter(e => {
+      const src = e.sumberKas;
+      if (src === 'rombongTunai' || src === 'rombongBank') return true;
+      if (src === 'rtTunai' || src === 'rtPettyCash' || src === 'rtBank') return false;
+      return e.kategori === 'Kas Rombong';
+    });
 
-    // Real Kas RT
+    // Real Kas RT (Excluding all internal mutations and transfers)
     const rtDebit = rtEntries
-      .filter(e => e.tipe === 'pemasukan' && !isMutasi(e))
+      .filter(e => e.tipe === 'pemasukan' && !isInternalMutationOrTransfer(e))
       .reduce((sum, e) => sum + e.jumlah, 0);
 
     const rtKredit = rtEntries
-      .filter(e => e.tipe === 'pengeluaran' && !isMutasi(e))
+      .filter(e => e.tipe === 'pengeluaran' && !isInternalMutationOrTransfer(e))
       .reduce((sum, e) => sum + e.jumlah, 0);
 
-    const rtMutasi = rtEntries
-      .filter(e => isMutasi(e))
+    const rtMutasiOut = rtEntries
+      .filter(e => isInternalMutationOrTransfer(e) && e.tipe === 'pengeluaran')
       .reduce((sum, e) => sum + e.jumlah, 0);
+    const rtMutasiIn = rtEntries
+      .filter(e => isInternalMutationOrTransfer(e) && e.tipe === 'pemasukan')
+      .reduce((sum, e) => sum + e.jumlah, 0);
+    const rtMutasi = Math.max(rtMutasiOut, rtMutasiIn);
 
-    // Real Kas Rombong
+    // Real Kas Rombong (Excluding all internal mutations and transfers)
     const rbDebit = rbEntries
-      .filter(e => e.tipe === 'pemasukan' && !isMutasi(e))
+      .filter(e => e.tipe === 'pemasukan' && !isInternalMutationOrTransfer(e))
       .reduce((sum, e) => sum + e.jumlah, 0);
 
     const rbKredit = rbEntries
-      .filter(e => e.tipe === 'pengeluaran' && !isMutasi(e))
+      .filter(e => e.tipe === 'pengeluaran' && !isInternalMutationOrTransfer(e))
       .reduce((sum, e) => sum + e.jumlah, 0);
 
-    const rbMutasi = rbEntries
-      .filter(e => isMutasi(e))
+    const rbMutasiOut = rbEntries
+      .filter(e => isInternalMutationOrTransfer(e) && e.tipe === 'pengeluaran')
       .reduce((sum, e) => sum + e.jumlah, 0);
+    const rbMutasiIn = rbEntries
+      .filter(e => isInternalMutationOrTransfer(e) && e.tipe === 'pemasukan')
+      .reduce((sum, e) => sum + e.jumlah, 0);
+    const rbMutasi = Math.max(rbMutasiOut, rbMutasiIn);
 
     const totalDebit = rtDebit + rbDebit;
     const totalKredit = rtKredit + rbKredit;
@@ -1798,11 +1877,11 @@ export default function Ledger({
               </h3>
               <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 uppercase tracking-wide flex items-center gap-1">
                 <Check className="w-3 h-3 text-emerald-400" />
-                Eliminasi Mutasi Bank
+                Eliminasi Mutasi Bank &amp; Kas
               </span>
             </div>
             <p className="text-xs text-slate-300 font-medium">
-              Ringkasan Pemasukan (Debit) &amp; Pengeluaran (Kredit) riil tanpa distorsi transfer mutasi internal bank/kas.
+              Ringkasan Pemasukan (Debit) &amp; Pengeluaran (Kredit) riil pemakaian operasional tanpa distorsi mutasi bank, kas kecil (petty cash), dan perpindahan dana internal.
             </p>
           </div>
 
@@ -1925,7 +2004,7 @@ export default function Ledger({
 
             <div className="text-[11px] text-slate-400 font-medium flex items-center gap-1.5 pt-1 border-t border-slate-700/50">
               <ArrowRightLeft className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-              <span>Mutasi bank/kas terpotong: <strong className="text-amber-300 font-mono font-bold">Rp {quickSummary.rtMutasi.toLocaleString('id-ID')}</strong></span>
+              <span>Mutasi internal bank/kas/petty tereliminasi: <strong className="text-amber-300 font-mono font-bold">Rp {quickSummary.rtMutasi.toLocaleString('id-ID')}</strong></span>
             </div>
           </div>
 
@@ -1945,7 +2024,7 @@ export default function Ledger({
               <div className="bg-slate-900/60 p-2.5 rounded-xl border border-emerald-500/20 space-y-1">
                 <p className="text-[10px] font-bold text-emerald-400 flex items-center gap-1">
                   <ArrowDownLeft className="w-3 h-3 text-emerald-400" />
-                  Debit (Masuk)
+                  Debit (Masuk Riil)
                 </p>
                 <p className="text-xs sm:text-sm font-black font-mono text-emerald-300">
                   Rp {quickSummary.rbDebit.toLocaleString('id-ID')}
@@ -1955,7 +2034,7 @@ export default function Ledger({
               <div className="bg-slate-900/60 p-2.5 rounded-xl border border-rose-500/20 space-y-1">
                 <p className="text-[10px] font-bold text-rose-400 flex items-center gap-1">
                   <ArrowUpRight className="w-3 h-3 text-rose-400" />
-                  Kredit (Keluar)
+                  Kredit (Keluar Riil)
                 </p>
                 <p className="text-xs sm:text-sm font-black font-mono text-rose-300">
                   Rp {quickSummary.rbKredit.toLocaleString('id-ID')}
@@ -1982,7 +2061,7 @@ export default function Ledger({
 
             <div className="text-[11px] text-slate-400 font-medium flex items-center gap-1.5 pt-1 border-t border-slate-700/50">
               <ArrowRightLeft className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-              <span>Mutasi bank/kas terpotong: <strong className="text-amber-300 font-mono font-bold">Rp {quickSummary.rbMutasi.toLocaleString('id-ID')}</strong></span>
+              <span>Mutasi setor bank rombong tereliminasi: <strong className="text-amber-300 font-mono font-bold">Rp {quickSummary.rbMutasi.toLocaleString('id-ID')}</strong></span>
             </div>
           </div>
 
@@ -2039,7 +2118,7 @@ export default function Ledger({
 
             <div className="text-[11px] text-slate-400 font-medium flex items-center gap-1.5 pt-1 border-t border-slate-700/50">
               <Scale className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-              <span>Total mutasi tersaring: <strong className="text-sky-300 font-mono font-bold">Rp {quickSummary.totalMutasi.toLocaleString('id-ID')}</strong></span>
+              <span>Total mutasi internal tereliminasi: <strong className="text-sky-300 font-mono font-bold">Rp {quickSummary.totalMutasi.toLocaleString('id-ID')}</strong></span>
             </div>
           </div>
 

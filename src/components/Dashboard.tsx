@@ -124,6 +124,33 @@ export default function Dashboard({
     };
   }, [ledger]);
 
+  const rtTunaiBreakdown = React.useMemo(() => {
+    let totalMasuk = 0;
+    let totalKeluar = 0;
+
+    ledger.forEach(item => {
+      if (item.kategori === 'Penarikan Dana Kolektor') {
+        return;
+      }
+      
+      const val = item.jumlah;
+      const isPemasukan = item.tipe === 'pemasukan';
+      
+      if (item.sumberKas === 'rtTunai') {
+        if (isPemasukan) {
+          totalMasuk += val;
+        } else {
+          totalKeluar += val;
+        }
+      }
+    });
+
+    return {
+      totalMasuk,
+      totalKeluar
+    };
+  }, [ledger]);
+
   const colBalancesRT = currentUser ? getCollectorBalancesForPeriod(ledger, currentUser.username, currentUser.nama, 'rtPettyCash') : { totalCollected: 0, totalPenarikan: 0, remaining: 0 };
   const colBalancesRombong = currentUser ? getCollectorBalancesForPeriod(ledger, currentUser.username, currentUser.nama, 'rombongTunai') : { totalCollected: 0, totalPenarikan: 0, remaining: 0 };
 
@@ -168,14 +195,14 @@ export default function Dashboard({
 
   // Specialized transaction helper states
   const [tagihanType, setTagihanType] = useState<'setor_bank'>('setor_bank');
-  const [bankType, setBankType] = useState<'bank_ke_petty' | 'petty_ke_bank'>('bank_ke_petty');
+  const [bankType, setBankType] = useState<'bank_ke_petty' | 'petty_ke_bank' | 'tunai_ke_petty' | 'petty_ke_tunai'>('bank_ke_petty');
   const [transferBankSelection, setTransferBankSelection] = useState<'rtBank' | 'rombongBank'>('rtBank');
   const [transferTargetKas, setTransferTargetKas] = useState<keyof Balance>('rombongTunai');
   const [transferAmount, setTransferAmount] = useState('');
   const [transferDesc, setTransferDesc] = useState('');
   const [transferPetugas, setTransferPetugas] = useState('');
   const [transferDate, setTransferDate] = useState('');
-  const [sectorSetor, setSectorSetor] = useState<'rt' | 'rombong'>('rt');
+  const [sectorSetor, setSectorSetor] = useState<'rt' | 'rtPetty' | 'rombong'>('rt');
 
   const kasLabels: Record<keyof Balance, { label: string; group: 'RT' | 'Rombong'; desc: string }> = {
     rtTunai: { label: 'Iuran RT Tunai', group: 'RT', desc: 'Sisa Hasil Tagihan Iuran Warga (Tunai)' },
@@ -271,15 +298,26 @@ export default function Dashboard({
       const parsedAmount = parseFloat(transferAmount);
       if (isNaN(parsedAmount) || parsedAmount <= 0) return;
 
-      const sourceKas: keyof Balance = sectorSetor === 'rt' ? 'rtTunai' : 'rombongTunai';
-      const targetKas: keyof Balance = sectorSetor === 'rt' ? 'rtBank' : 'rombongBank';
+      let sourceKas: keyof Balance = 'rtTunai';
+      let targetKas: keyof Balance = 'rtBank';
+
+      if (sectorSetor === 'rt') {
+        sourceKas = 'rtTunai';
+        targetKas = 'rtBank';
+      } else if (sectorSetor === 'rtPetty') {
+        sourceKas = 'rtPettyCash';
+        targetKas = 'rtBank';
+      } else {
+        sourceKas = 'rombongTunai';
+        targetKas = 'rombongBank';
+      }
 
       if (activeKas[sourceKas] < parsedAmount) {
         alert(`Peringatan: Saldo ${kasLabels[sourceKas].label} (Rp ${activeKas[sourceKas].toLocaleString('id-ID')}) tidak mencukupi untuk disetorkan ke bank sebesar Rp ${parsedAmount.toLocaleString('id-ID')}!`);
         return;
       }
 
-      const customDesc = transferDesc || `Setor Bank: Pemindahbukuan Hasil Tagihan ${sectorSetor.toUpperCase()}`;
+      const customDesc = transferDesc || `Setor Bank: Pemindahbukuan ${kasLabels[sourceKas].label} ke ${kasLabels[targetKas].label}`;
       const effectiveDate = transferDate || today;
       
       // 1. Outgoing from tunai
@@ -368,20 +406,36 @@ export default function Dashboard({
       const parsedAmount = parseFloat(transferAmount);
       if (isNaN(parsedAmount) || parsedAmount <= 0) return;
 
-      const sourceKas: keyof Balance = bankType === 'bank_ke_petty' ? transferBankSelection : transferTargetKas;
-      const targetKas: keyof Balance = bankType === 'bank_ke_petty' ? transferTargetKas : transferBankSelection;
+      let sourceKas: keyof Balance;
+      let targetKas: keyof Balance;
+      let defaultDesc = '';
+
+      if (bankType === 'tunai_ke_petty') {
+        sourceKas = 'rtTunai';
+        targetKas = 'rtPettyCash';
+        defaultDesc = 'Alokasi Dana: Iuran RT Tunai ke Kas Kecil (Petty Cash)';
+      } else if (bankType === 'petty_ke_tunai') {
+        sourceKas = 'rtPettyCash';
+        targetKas = 'rtTunai';
+        defaultDesc = 'Pengembalian Dana: Kas Kecil (Petty Cash) ke Iuran RT Tunai';
+      } else if (bankType === 'bank_ke_petty') {
+        sourceKas = transferBankSelection;
+        targetKas = transferTargetKas;
+        defaultDesc = `Mutasi ${kasLabels[transferBankSelection].label}: Penarikan dana mengisi ${kasLabels[transferTargetKas].label}`;
+      } else {
+        sourceKas = transferTargetKas;
+        targetKas = transferBankSelection;
+        defaultDesc = `Mutasi ${kasLabels[transferBankSelection].label}: Penyetoran sisa ${kasLabels[transferTargetKas].label}`;
+      }
 
       if (activeKas[sourceKas] < parsedAmount) {
         alert(`Peringatan: Saldo ${kasLabels[sourceKas].label} (Rp ${activeKas[sourceKas].toLocaleString('id-ID')}) tidak mencukupi untuk transfer/mutasi sebesar Rp ${parsedAmount.toLocaleString('id-ID')}!`);
         return;
       }
 
-      const bankLabel = kasLabels[transferBankSelection].label;
-      const targetLabel = kasLabels[transferTargetKas].label;
-      const customDesc = transferDesc || (bankType === 'bank_ke_petty' 
-        ? `Mutasi ${bankLabel}: Penarikan dana mengisi ${targetLabel}` 
-        : `Mutasi ${bankLabel}: Penyetoran sisa ${targetLabel}`);
+      const customDesc = transferDesc || defaultDesc;
       const effectiveDate = transferDate || today;
+      const kategoriMutasi = (sourceKas.includes('Bank') || targetKas.includes('Bank')) ? 'Mutasi Bank-Kas' : 'Mutasi Kas';
 
       // 1. Debit out of source
       addLedgerEntry({
@@ -391,7 +445,7 @@ export default function Dashboard({
         jumlah: parsedAmount,
         tipe: 'pengeluaran',
         sumberKas: sourceKas,
-        kategori: 'Mutasi Bank-Kas',
+        kategori: kategoriMutasi,
         petugas: transferPetugas || 'Bendahara RT'
       });
 
@@ -403,7 +457,7 @@ export default function Dashboard({
         jumlah: parsedAmount,
         tipe: 'pemasukan',
         sumberKas: targetKas,
-        kategori: 'Mutasi Bank-Kas',
+        kategori: kategoriMutasi,
         petugas: transferPetugas || 'Bendahara RT'
       });
 
@@ -421,23 +475,59 @@ export default function Dashboard({
     }
   };
 
+  // Helper to identify internal non-operational transfers
+  const isMutasiTx = (e: LedgerEntry) => {
+    const cat = (e.kategori || '').toLowerCase().trim();
+    const desc = (e.deskripsi || '').toLowerCase().trim();
+    return (
+      cat === 'setor bank' ||
+      cat === 'mutasi bank-petty' ||
+      cat === 'mutasi bank-kas' ||
+      cat === 'mutasi kas' ||
+      cat === 'transfer kas' ||
+      cat === 'penarikan dana kolektor' ||
+      cat === 'penyesuaian saldo' ||
+      cat.includes('mutasi') ||
+      cat.includes('setor bank') ||
+      cat.includes('pemindahbukuan') ||
+      cat.includes('penarikan dana kolektor') ||
+      cat.includes('alokasi dana') ||
+      desc.includes('mutasi') ||
+      desc.includes('setor bank') ||
+      desc.includes('pemindahbukuan') ||
+      desc.includes('penarikan dana kolektor') ||
+      desc.includes('alokasi dana') ||
+      desc.includes('pengembalian dana') ||
+      desc.includes('petty cash ke') ||
+      desc.includes('ke petty cash') ||
+      desc.includes('petty ke') ||
+      desc.includes('ke petty') ||
+      desc.includes('kas kecil ke') ||
+      desc.includes('ke kas kecil') ||
+      desc.includes('dari kas kecil') ||
+      desc.includes('dari petty cash') ||
+      desc.includes('isi kas kecil') ||
+      desc.includes('mengisi kas kecil') ||
+      desc.includes('pengisian kas kecil') ||
+      desc.includes('tarik kas bank') ||
+      desc.includes('tarik dari bank') ||
+      desc.includes('penyetoran sisa') ||
+      desc.includes('penyesuaian saldo') ||
+      desc.includes('saldo opname') ||
+      desc.includes('transfer kas') ||
+      desc.includes('transfer antar') ||
+      desc.includes('pindah kas') ||
+      desc.includes('pindah dana')
+    );
+  };
+
   // Aggregation calculations for stats cards (excluding internal transfers)
   const totalPemasukan = ledger
-    .filter(e => 
-      e.tipe === 'pemasukan' && 
-      e.kategori !== 'Setor Bank' && 
-      e.kategori !== 'Mutasi Bank-Petty' && 
-      e.kategori !== 'Penarikan Dana Kolektor'
-    )
+    .filter(e => e.tipe === 'pemasukan' && !isMutasiTx(e))
     .reduce((sum, e) => sum + e.jumlah, 0);
 
   const totalPengeluaran = ledger
-    .filter(e => 
-      e.tipe === 'pengeluaran' && 
-      e.kategori !== 'Setor Bank' && 
-      e.kategori !== 'Mutasi Bank-Petty' && 
-      e.kategori !== 'Penarikan Dana Kolektor'
-    )
+    .filter(e => e.tipe === 'pengeluaran' && !isMutasiTx(e))
     .reduce((sum, e) => sum + e.jumlah, 0);
 
   // Percent proportions for beautiful modern bar chart
@@ -559,20 +649,26 @@ export default function Dashboard({
 
             {/* Rincian RT Tunai & Kas Kecil */}
             {!isKolektor && !isKolektor2 && (
-              <div className="mt-2 pl-5 border-l border-slate-700 flex flex-col gap-1.5 text-[11px] text-slate-400 font-mono leading-relaxed">
-                <div className="flex items-center gap-2">
+              <div className="mt-2 pl-5 border-l border-slate-700 flex flex-col gap-2 text-[11px] text-slate-400 font-mono leading-relaxed">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 shrink-0" />
-                  <span>Sisa Kas Kecil (Operasional RT):</span>
+                  <span className="text-slate-300 font-semibold">Kas Kecil RT (Petty Cash):</span>
                   <span className="text-indigo-300 font-bold">Rp {activeKas.rtPettyCash.toLocaleString('id-ID')}</span>
+                  <span className="text-[10px] text-slate-400 font-sans">
+                    (Masuk: <span className="text-emerald-400 font-mono">Rp {pettyCashBreakdown.totalMasuk.toLocaleString('id-ID')}</span> | Keluar: <span className="text-rose-400 font-mono">Rp {pettyCashBreakdown.totalKeluar.toLocaleString('id-ID')}</span>)
+                  </span>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
-                  <span>Sisa Hasil Tagihan Iuran Warga (Tunai):</span>
+                  <span className="text-slate-300 font-semibold">Iuran RT Tunai:</span>
                   <span className="text-amber-300 font-bold">Rp {activeKas.rtTunai.toLocaleString('id-ID')}</span>
+                  <span className="text-[10px] text-slate-400 font-sans">
+                    (Masuk: <span className="text-emerald-400 font-mono">Rp {rtTunaiBreakdown.totalMasuk.toLocaleString('id-ID')}</span> | Keluar: <span className="text-rose-400 font-mono">Rp {rtTunaiBreakdown.totalKeluar.toLocaleString('id-ID')}</span>)
+                  </span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="w-1.5 h-1.5 rounded-full bg-sky-450 shrink-0" />
-                  <span>Total Bank RT (Bank RT & Bank Rombong):</span>
+                  <span className="text-slate-300 font-semibold">Total Bank RT (Bank RT & Bank Rombong):</span>
                   <span className="text-sky-350 font-bold">Rp {(activeKas.rtBank + activeKas.rombongBank).toLocaleString('id-ID')}</span>
                 </div>
               </div>
@@ -677,32 +773,43 @@ export default function Dashboard({
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-650 mb-1.5 font-mono">Sektor / Kas yang Disetor</label>
-                    <div className="grid grid-cols-2 gap-2">
+                    <label className="block text-xs font-semibold text-slate-650 mb-1.5 font-mono">Sektor / Pintu Kas yang Disetor ke Bank</label>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                       <button
                         type="button"
                         onClick={() => setSectorSetor('rt')}
-                        className={`py-2 px-3 rounded-xl text-xs font-bold transition cursor-pointer text-center border ${
+                        className={`py-2 px-2.5 rounded-xl text-xs font-bold transition cursor-pointer text-center border ${
                           sectorSetor === 'rt'
                             ? 'bg-sky-600 text-white border-sky-600 shadow-sm'
-                            : 'bg-slate-50 text-slate-600 border-slate-200'
+                            : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
                         }`}
                       >
-                        RT (Tunai ➔ Bank)
-                        <div className="text-[10px] opacity-75 font-mono">Sisa Kas Kecil: Rp {activeKas.rtPettyCash.toLocaleString('id-ID')}</div>
-                        <div className="text-[10px] opacity-95 font-mono font-bold text-amber-300">Sisa Hasil Tagihan: Rp {activeKas.rtTunai.toLocaleString('id-ID')}</div>
+                        💵 Iuran RT Tunai
+                        <div className="text-[10px] opacity-90 font-mono font-bold mt-0.5">Sisa: Rp {activeKas.rtTunai.toLocaleString('id-ID')}</div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSectorSetor('rtPetty')}
+                        className={`py-2 px-2.5 rounded-xl text-xs font-bold transition cursor-pointer text-center border ${
+                          sectorSetor === 'rtPetty'
+                            ? 'bg-amber-600 text-white border-amber-600 shadow-sm'
+                            : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        🪙 Kas Kecil (Petty)
+                        <div className="text-[10px] opacity-90 font-mono font-bold mt-0.5">Sisa: Rp {activeKas.rtPettyCash.toLocaleString('id-ID')}</div>
                       </button>
                       <button
                         type="button"
                         onClick={() => setSectorSetor('rombong')}
-                        className={`py-2 px-3 rounded-xl text-xs font-bold transition cursor-pointer text-center border ${
+                        className={`py-2 px-2.5 rounded-xl text-xs font-bold transition cursor-pointer text-center border ${
                           sectorSetor === 'rombong'
                             ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
-                            : 'bg-slate-50 text-slate-600 border-slate-200'
+                            : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
                         }`}
                       >
-                        Rombong (Tunai ➔ Bank)
-                        <div className="text-[10px] opacity-75 font-mono">Sisa Tunai: Rp {activeKas.rombongTunai.toLocaleString('id-ID')}</div>
+                        🍱 Rombong Tunai
+                        <div className="text-[10px] opacity-90 font-mono font-bold mt-0.5">Sisa: Rp {activeKas.rombongTunai.toLocaleString('id-ID')}</div>
                       </button>
                     </div>
                   </div>
@@ -734,7 +841,7 @@ export default function Dashboard({
                     <label className="block text-xs font-semibold text-slate-650 mb-1.5 font-mono">Catatan / Deskripsi Setor Bank (Opsional)</label>
                     <input
                       type="text"
-                      placeholder={`Setor Bank: Penyetoran Akumulasi hasil Iuran Cash ${sectorSetor.toUpperCase()}`}
+                      placeholder={`Setor Bank: Penyetoran Akumulasi hasil Iuran Cash ${sectorSetor === 'rt' ? 'Iuran RT' : sectorSetor === 'rtPetty' ? 'Kas Kecil RT' : 'Rombong'}`}
                       value={transferDesc}
                       onChange={e => setTransferDesc(e.target.value)}
                       className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
@@ -799,7 +906,8 @@ export default function Dashboard({
                       className="w-full bg-slate-50 border border-slate-205 rounded-xl p-2.5 text-xs text-slate-955 focus:outline-none focus:ring-2 focus:ring-sky-500 font-mono font-bold"
                     >
                       <option value="rtPettyCash">[RT] Kas Kecil (Sisa: Rp {activeKas.rtPettyCash.toLocaleString('id-ID')})</option>
-                      <option value="rtBank">[RT] Kas Umum (Sisa: Rp {activeKas.rtBank.toLocaleString('id-ID')})</option>
+                      <option value="rtTunai">[RT] Iuran RT Tunai (Sisa: Rp {activeKas.rtTunai.toLocaleString('id-ID')})</option>
+                      <option value="rtBank">[RT] Kas Umum Bank (Sisa: Rp {activeKas.rtBank.toLocaleString('id-ID')})</option>
                       <option value="rombongTunai">[Rombong] Rombong Tunai (Sisa: Rp {activeKas.rombongTunai.toLocaleString('id-ID')})</option>
                       <option value="rombongBank">[Rombong] Rombong Bank (Sisa: Rp {activeKas.rombongBank.toLocaleString('id-ID')})</option>
                     </select>
@@ -1020,34 +1128,50 @@ export default function Dashboard({
                 </div>
 
                 {/* Switch direction */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
                   <button
                     type="button"
                     onClick={() => setBankType('bank_ke_petty')}
-                    className={`py-2.5 px-3 rounded-xl text-xs font-extrabold transition cursor-pointer text-center border ${
+                    className={`py-2 px-2.5 rounded-xl text-xs font-bold transition cursor-pointer text-center border ${
                       bankType === 'bank_ke_petty'
-                        ? 'bg-emerald-50 text-emerald-800 border-emerald-300 shadow-xs'
-                        : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'
+                        ? 'bg-emerald-50 text-emerald-800 border-emerald-300 ring-2 ring-emerald-500/10 shadow-xs'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
                     }`}
                   >
                     📥 Tarik {kasLabels[transferBankSelection].label} ➔ Isi {kasLabels[transferTargetKas].label}
-                    <div className="text-[10px] font-mono font-medium opacity-80 mt-0.5">
-                      Sisa Bank: Rp {activeKas[transferBankSelection].toLocaleString('id-ID')}
-                    </div>
                   </button>
                   <button
                     type="button"
                     onClick={() => setBankType('petty_ke_bank')}
-                    className={`py-2.5 px-3 rounded-xl text-xs font-extrabold transition cursor-pointer text-center border ${
+                    className={`py-2 px-2.5 rounded-xl text-xs font-bold transition cursor-pointer text-center border ${
                       bankType === 'petty_ke_bank'
-                        ? 'bg-emerald-50 text-emerald-800 border-emerald-300 shadow-xs'
-                        : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'
+                        ? 'bg-emerald-50 text-emerald-800 border-emerald-300 ring-2 ring-emerald-500/10 shadow-xs'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
                     }`}
                   >
                     📤 Setor {kasLabels[transferTargetKas].label} ➔ {kasLabels[transferBankSelection].label}
-                    <div className="text-[10px] font-mono font-medium opacity-80 mt-0.5">
-                      Sisa Kas: Rp {activeKas[transferTargetKas].toLocaleString('id-ID')}
-                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBankType('tunai_ke_petty')}
+                    className={`py-2 px-2.5 rounded-xl text-xs font-bold transition cursor-pointer text-center border ${
+                      bankType === 'tunai_ke_petty'
+                        ? 'bg-amber-50 text-amber-800 border-amber-300 ring-2 ring-amber-500/10 shadow-xs'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    🔄 Iuran RT Tunai ➔ Kas Kecil
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBankType('petty_ke_tunai')}
+                    className={`py-2 px-2.5 rounded-xl text-xs font-bold transition cursor-pointer text-center border ${
+                      bankType === 'petty_ke_tunai'
+                        ? 'bg-amber-50 text-amber-800 border-amber-300 ring-2 ring-amber-500/10 shadow-xs'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    🔁 Kas Kecil ➔ Iuran RT Tunai
                   </button>
                 </div>
 

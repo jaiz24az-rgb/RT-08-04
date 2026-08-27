@@ -362,7 +362,7 @@ export default function BukuKolektor({
 
   const getKasBadgeColor = (sumber: keyof Balance) => {
     switch(sumber) {
-      case 'rtTunai': return 'bg-indigo-100 border-indigo-200 text-indigo-850';
+      case 'rtTunai': return 'bg-amber-100 border-amber-200 text-amber-900';
       case 'rtPettyCash': return 'bg-indigo-100 border-indigo-200 text-indigo-850';
       case 'rombongTunai': return 'bg-orange-100 border-orange-200 text-orange-850';
       case 'rtBank': return 'bg-sky-100 border-sky-200 text-sky-850';
@@ -373,8 +373,8 @@ export default function BukuKolektor({
 
   const getKasLabel = (sumber: keyof Balance) => {
     switch(sumber) {
-      case 'rtTunai': return 'Kas Kecil';
-      case 'rtPettyCash': return 'Kas Kecil';
+      case 'rtTunai': return 'Iuran RT Tunai';
+      case 'rtPettyCash': return 'Kas Kecil RT';
       case 'rombongTunai': return 'Rombong Tunai';
       case 'rtBank': return 'RT Bank';
       case 'rombongBank': return 'Rombong Bank';
