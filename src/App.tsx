@@ -1723,8 +1723,13 @@ export default function App() {
     };
   }, [ledger]);
 
-  const isAdminOrTreasurerOrSecretary = currentUser?.role === 'admin' || currentUser?.role === 'bendahara' || currentUser?.role === 'sekretaris' || currentUser?.role === 'audit';
-  const activeKas = isAdminOrTreasurerOrSecretary ? derivedKas : kas;
+  const activeKas = derivedKas;
+
+  // Keep local storage and kas state synchronized with the derived source of truth
+  useEffect(() => {
+    setKas(derivedKas);
+    localStorage.setItem('perumtas_rt08_kas', JSON.stringify(derivedKas));
+  }, [derivedKas]);
 
   // Intercepting and proxying mutators directly to Firestore / Supabase + Local State
   const handleUpdateLettersList = async (newLetters: OfficialLetter[] | ((prev: OfficialLetter[]) => OfficialLetter[])) => {
