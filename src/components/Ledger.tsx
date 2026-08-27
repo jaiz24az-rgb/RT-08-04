@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import * as XLSX from 'xlsx';
 import { LedgerEntry, Balance, AppUser, WargaBill, RombongBill } from '../types';
 import { getBase64SizeInBytes, formatFileSize } from '../utils/fileSizeUtils';
 import { compressImage } from '../utils/fileCompressor';
@@ -1242,298 +1243,286 @@ export default function Ledger({
 
   const handleExportExcel = () => {
     let periodStr = 'Semua_Periode';
-    if (selectedYear !== 'semua') {
+    let periodDisplayTitle = 'Semua Periode';
+    
+    if (dateFilterMode === 'dateRange') {
+      if (startDate && endDate) {
+        periodStr = `${startDate}_sd_${endDate}`;
+        periodDisplayTitle = `${startDate} s/d ${endDate}`;
+      } else if (startDate) {
+        periodStr = `Mulai_${startDate}`;
+        periodDisplayTitle = `Mulai ${startDate}`;
+      } else if (endDate) {
+        periodStr = `Sampai_${endDate}`;
+        periodDisplayTitle = `Sampai ${endDate}`;
+      }
+    } else if (selectedYear !== 'semua') {
       periodStr = `${selectedYear}`;
       if (selectedMonth !== 'semua') {
         const monthIndex = parseInt(selectedMonth, 10) - 1;
         const name = INDO_MONTHS[monthIndex]?.name || 'Bulan';
         periodStr = `${name}_${selectedYear}`;
+        periodDisplayTitle = `${name} ${selectedYear}`;
+      } else {
+        periodDisplayTitle = `Tahun ${selectedYear}`;
       }
     }
 
     if (viewMode === 'tabelaris') {
-      // 1. Export in dynamic XLS with real Excel formulas and corporate styling
-      const escapeHtml = (text: string) => {
-        if (!text) return '';
-        return text
-          .replace(/&/g, '&amp;')
-          .replace(/</g, '&lt;')
-          .replace(/>/g, '&gt;')
-          .replace(/"/g, '&quot;')
-          .replace(/'/g, '&#039;');
-      };
+      // 1. Export in native XLSX with real Excel formulas and synchronized balances
+      const wb = XLSX.utils.book_new();
+      const ws: XLSX.WorkSheet = {};
 
-      const tableHeadersHtml = `
-<tr style="background-color: #0f172a; color: #ffffff; text-align: center; font-weight: bold; font-size: 11px;">
-  <th rowspan="3" style="border: 1px solid #cbd5e1; background-color: #0f172a; color: #ffffff; padding: 8px;">TANGGAL</th>
-  <th rowspan="3" style="border: 1px solid #cbd5e1; background-color: #0f172a; color: #ffffff; padding: 8px;">NO BUKTI</th>
-  <th rowspan="3" style="border: 1px solid #cbd5e1; background-color: #0f172a; color: #ffffff; padding: 8px;">KAS / KETERANGAN TRANSAKSI</th>
-  <th rowspan="3" style="border: 1px solid #cbd5e1; background-color: #0f172a; color: #ffffff; padding: 8px;">PETUGAS</th>
-  <th colspan="10" style="border: 1px solid #cbd5e1; background-color: #1e293b; color: #ffffff; padding: 6px;">TOTAL KAS RT (IURAN, KECIL & BANK)</th>
-  <th colspan="7" style="border: 1px solid #cbd5e1; background-color: #0c4a6e; color: #ffffff; padding: 6px;">TOTAL KAS ROMBONG (TUNAI & BANK)</th>
-  <th rowspan="3" style="border: 1px solid #cbd5e1; background-color: #1e1b4b; color: #ffffff; padding: 8px; font-weight: 900;">GRAND TOTAL KAS (KAS UMUM)</th>
-</tr>
-<tr style="background-color: #1e293b; color: #ffffff; text-align: center; font-weight: bold; font-size: 10px;">
-  <th colspan="3" style="border: 1px solid #cbd5e1; background-color: #451a03; color: #fef3c7; padding: 6px;">IURAN RT (rtTunai)</th>
-  <th colspan="3" style="border: 1px solid #cbd5e1; background-color: #334155; color: #f1f5f9; padding: 6px;">KAS KECIL (rtPettyCash)</th>
-  <th colspan="3" style="border: 1px solid #cbd5e1; background-color: #1e1b4b; color: #e0e7ff; padding: 6px;">RT BANK (rtBank)</th>
-  <th rowspan="2" style="border: 1px solid #cbd5e1; background-color: #78350f; color: #ffffff; padding: 6px; font-weight: bold;">TOTAL SALDO RT</th>
-  <th colspan="3" style="border: 1px solid #cbd5e1; background-color: #082f49; color: #e0f2fe; padding: 6px;">ROMBONG TUNAI (rombongTunai)</th>
-  <th colspan="3" style="border: 1px solid #cbd5e1; background-color: #064e3b; color: #d1fae5; padding: 6px;">ROMBONG BANK (rombongBank)</th>
-  <th rowspan="2" style="border: 1px solid #cbd5e1; background-color: #0369a1; color: #ffffff; padding: 6px; font-weight: bold;">TOTAL SALDO RB</th>
-</tr>
-<tr style="background-color: #f8fafc; color: #334155; text-align: center; font-weight: bold; font-size: 9px;">
-  <th style="border: 1px solid #cbd5e1; background-color: #fffbeb; padding: 4px;">DEBIT</th>
-  <th style="border: 1px solid #cbd5e1; background-color: #fffbeb; padding: 4px;">KREDIT</th>
-  <th style="border: 1px solid #cbd5e1; background-color: #fef3c7; padding: 4px;">SALDO</th>
-  <th style="border: 1px solid #cbd5e1; background-color: #f8fafc; padding: 4px;">DEBIT</th>
-  <th style="border: 1px solid #cbd5e1; background-color: #f8fafc; padding: 4px;">KREDIT</th>
-  <th style="border: 1px solid #cbd5e1; background-color: #e2e8f0; padding: 4px;">SALDO</th>
-  <th style="border: 1px solid #cbd5e1; background-color: #eef2ff; padding: 4px;">DEBIT</th>
-  <th style="border: 1px solid #cbd5e1; background-color: #eef2ff; padding: 4px;">KREDIT</th>
-  <th style="border: 1px solid #cbd5e1; background-color: #c7d2fe; padding: 4px;">SALDO</th>
-  <th style="border: 1px solid #cbd5e1; background-color: #f0f9ff; padding: 4px;">DEBIT</th>
-  <th style="border: 1px solid #cbd5e1; background-color: #f0f9ff; padding: 4px;">KREDIT</th>
-  <th style="border: 1px solid #cbd5e1; background-color: #bae6fd; padding: 4px;">SALDO</th>
-  <th style="border: 1px solid #cbd5e1; background-color: #f0fdf4; padding: 4px;">DEBIT</th>
-  <th style="border: 1px solid #cbd5e1; background-color: #f0fdf4; padding: 4px;">KREDIT</th>
-  <th style="border: 1px solid #cbd5e1; background-color: #bbf7d0; padding: 4px;">SALDO</th>
-</tr>
-`;
+      // Title & Header Information (Rows 1-3)
+      ws['A1'] = { t: 's', v: 'REKAP TABELARIS BUKU KAS RT 08 / RW 04' };
+      ws['A2'] = { t: 's', v: `Periode: ${periodDisplayTitle}` };
+      ws['A3'] = { t: 's', v: '*File ini dilengkapi formula Excel dinamis & saldo tersinkronisasi. Perubahan nilai Debit/Kredit otomatis memperbarui seluruh saldo.' };
 
-      const rowSaldoAwalHtml = `
-<tr style="background-color: #fafaf9; font-style: italic; font-weight: bold; font-size: 11px;">
-  <td style="border: 1px solid #cbd5e1; text-align: center; padding: 6px;"></td>
-  <td style="border: 1px solid #cbd5e1; text-align: center; padding: 6px;"></td>
-  <td style="border: 1px solid #cbd5e1; text-align: left; padding: 6px;">SALDO PERIODE LALU</td>
-  <td style="border: 1px solid #cbd5e1; text-align: left; padding: 6px;"></td>
-  
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 6px; mso-number-format:'\\#\\,\\#\\#0';"></td>
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 6px; mso-number-format:'\\#\\,\\#\\#0';"></td>
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 6px; mso-number-format:'\\#\\,\\#\\#0';">${saldoAwal.rtTunai || 0}</td>
-  
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 6px; mso-number-format:'\\#\\,\\#\\#0';"></td>
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 6px; mso-number-format:'\\#\\,\\#\\#0';"></td>
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 6px; mso-number-format:'\\#\\,\\#\\#0';">${saldoAwal.rtPettyCash || 0}</td>
-  
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 6px; mso-number-format:'\\#\\,\\#\\#0';"></td>
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 6px; mso-number-format:'\\#\\,\\#\\#0';"></td>
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 6px; mso-number-format:'\\#\\,\\#\\#0';">${saldoAwal.rtBank || 0}</td>
-  
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 6px; font-weight: bold; background-color: #fef3c7; mso-number-format:'\\#\\,\\#\\#0';">=G4+J4+M4</td>
-  
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 6px; mso-number-format:'\\#\\,\\#\\#0';"></td>
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 6px; mso-number-format:'\\#\\,\\#\\#0';"></td>
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 6px; mso-number-format:'\\#\\,\\#\\#0';">${saldoAwal.rb || 0}</td>
-  
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 6px; mso-number-format:'\\#\\,\\#\\#0';"></td>
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 6px; mso-number-format:'\\#\\,\\#\\#0';"></td>
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 6px; mso-number-format:'\\#\\,\\#\\#0';">${saldoAwal.bk || 0}</td>
-  
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 6px; font-weight: bold; background-color: #e0f2fe; mso-number-format:'\\#\\,\\#\\#0';">=Q4+T4</td>
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 6px; font-weight: bold; background-color: #e0e7ff; mso-number-format:'\\#\\,\\#\\#0';">=N4+U4</td>
-</tr>
-`;
+      // Row 5: Header Tier 1
+      ws['A5'] = { t: 's', v: 'TANGGAL' };
+      ws['B5'] = { t: 's', v: 'NO BUKTI' };
+      ws['C5'] = { t: 's', v: 'KAS / KETERANGAN TRANSAKSI' };
+      ws['D5'] = { t: 's', v: 'PETUGAS' };
+      ws['E5'] = { t: 's', v: 'TOTAL KAS RT (IURAN, KECIL & BANK)' };
+      ws['O5'] = { t: 's', v: 'TOTAL KAS ROMBONG (TUNAI & BANK)' };
+      ws['V5'] = { t: 's', v: 'GRAND TOTAL KAS (KAS UMUM)' };
 
-      const dataRowsHtml = visibleTabularRows.map((row, idx) => {
-        const rowNum = idx + 5;
-        const prevRow = rowNum - 1;
+      // Row 6: Header Tier 2
+      ws['E6'] = { t: 's', v: 'IURAN RT (rtTunai)' };
+      ws['H6'] = { t: 's', v: 'KAS KECIL (rtPettyCash)' };
+      ws['K6'] = { t: 's', v: 'RT BANK (rtBank)' };
+      ws['N6'] = { t: 's', v: 'TOTAL SALDO RT' };
+      ws['O6'] = { t: 's', v: 'ROMBONG TUNAI (rombongTunai)' };
+      ws['R6'] = { t: 's', v: 'ROMBONG BANK (rombongBank)' };
+      ws['U6'] = { t: 's', v: 'TOTAL SALDO RB' };
 
-        return `
-<tr style="font-size: 11px;">
-  <td style="border: 1px solid #cbd5e1; text-align: center; padding: 6px;">${escapeHtml(row.tanggal)}</td>
-  <td style="border: 1px solid #cbd5e1; text-align: center; padding: 6px; mso-number-format:'\\@';">${escapeHtml(row.noBukti)}</td>
-  <td style="border: 1px solid #cbd5e1; text-align: left; padding: 6px;">${escapeHtml(row.deskripsi)}</td>
-  <td style="border: 1px solid #cbd5e1; text-align: left; padding: 6px;">${escapeHtml(row.petugas)}</td>
-  
-  <!-- rtTunai -->
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 6px; mso-number-format:'\\#\\,\\#\\#0';">${row.rtTunaiDebit || ''}</td>
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 6px; mso-number-format:'\\#\\,\\#\\#0';">${row.rtTunaiKredit || ''}</td>
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 6px; background-color: #fffbeb; mso-number-format:'\\#\\,\\#\\#0';">=G${prevRow}+E${rowNum}-F${rowNum}</td>
-  
-  <!-- rtPettyCash -->
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 6px; mso-number-format:'\\#\\,\\#\\#0';">${row.rtPettyCashDebit || ''}</td>
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 6px; mso-number-format:'\\#\\,\\#\\#0';">${row.rtPettyCashKredit || ''}</td>
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 6px; background-color: #f8fafc; mso-number-format:'\\#\\,\\#\\#0';">=J${prevRow}+H${rowNum}-I${rowNum}</td>
-  
-  <!-- rtBank -->
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 6px; mso-number-format:'\\#\\,\\#\\#0';">${row.rtBankDebit || ''}</td>
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 6px; mso-number-format:'\\#\\,\\#\\#0';">${row.rtBankKredit || ''}</td>
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 6px; background-color: #eef2ff; mso-number-format:'\\#\\,\\#\\#0';">=M${prevRow}+K${rowNum}-L${rowNum}</td>
-  
-  <!-- Total Saldo RT -->
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 6px; font-weight: bold; background-color: #fef3c7; mso-number-format:'\\#\\,\\#\\#0';">=G${rowNum}+J${rowNum}+M${rowNum}</td>
-  
-  <!-- rombongTunai -->
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 6px; mso-number-format:'\\#\\,\\#\\#0';">${row.rbDebit || ''}</td>
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 6px; mso-number-format:'\\#\\,\\#\\#0';">${row.rbKredit || ''}</td>
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 6px; background-color: #f0f9ff; mso-number-format:'\\#\\,\\#\\#0';">=Q${prevRow}+O${rowNum}-P${rowNum}</td>
-  
-  <!-- rombongBank -->
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 6px; mso-number-format:'\\#\\,\\#\\#0';">${row.bkDebit || ''}</td>
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 6px; mso-number-format:'\\#\\,\\#\\#0';">${row.bkKredit || ''}</td>
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 6px; background-color: #f0fdf4; mso-number-format:'\\#\\,\\#\\#0';">=T${prevRow}+R${rowNum}-S${rowNum}</td>
-  
-  <!-- Total Saldo RB -->
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 6px; font-weight: bold; background-color: #e0f2fe; mso-number-format:'\\#\\,\\#\\#0';">=Q${rowNum}+T${rowNum}</td>
-  
-  <!-- Grand Total Kas Umum -->
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 6px; font-weight: bold; background-color: #e0e7ff; mso-number-format:'\\#\\,\\#\\#0';">=N${rowNum}+U${rowNum}</td>
-</tr>`;
-      }).join('\n');
+      // Row 7: Header Tier 3
+      ws['E7'] = { t: 's', v: 'DEBIT' };
+      ws['F7'] = { t: 's', v: 'KREDIT' };
+      ws['G7'] = { t: 's', v: 'SALDO' };
+      ws['H7'] = { t: 's', v: 'DEBIT' };
+      ws['I7'] = { t: 's', v: 'KREDIT' };
+      ws['J7'] = { t: 's', v: 'SALDO' };
+      ws['K7'] = { t: 's', v: 'DEBIT' };
+      ws['L7'] = { t: 's', v: 'KREDIT' };
+      ws['M7'] = { t: 's', v: 'SALDO' };
+      ws['O7'] = { t: 's', v: 'DEBIT' };
+      ws['P7'] = { t: 's', v: 'KREDIT' };
+      ws['Q7'] = { t: 's', v: 'SALDO' };
+      ws['R7'] = { t: 's', v: 'DEBIT' };
+      ws['S7'] = { t: 's', v: 'KREDIT' };
+      ws['T7'] = { t: 's', v: 'SALDO' };
 
-      const totalRowNum = visibleTabularRows.length + 5;
-      const lastDataRow = visibleTabularRows.length > 0 ? (totalRowNum - 1) : 4;
+      // Row 8: Saldo Awal (Periode Lalu)
+      ws['C8'] = { t: 's', v: 'SALDO PERIODE LALU' };
+      ws['E8'] = { t: 'n', v: 0, z: '#,##0' };
+      ws['F8'] = { t: 'n', v: 0, z: '#,##0' };
+      ws['G8'] = { t: 'n', v: saldoAwal.rtTunai || 0, z: '#,##0' };
+      ws['H8'] = { t: 'n', v: 0, z: '#,##0' };
+      ws['I8'] = { t: 'n', v: 0, z: '#,##0' };
+      ws['J8'] = { t: 'n', v: saldoAwal.rtPettyCash || 0, z: '#,##0' };
+      ws['K8'] = { t: 'n', v: 0, z: '#,##0' };
+      ws['L8'] = { t: 'n', v: 0, z: '#,##0' };
+      ws['M8'] = { t: 'n', v: saldoAwal.rtBank || 0, z: '#,##0' };
+      ws['N8'] = { t: 'n', f: 'G8+J8+M8', v: saldoAwal.totalRT || 0, z: '#,##0' };
+      ws['O8'] = { t: 'n', v: 0, z: '#,##0' };
+      ws['P8'] = { t: 'n', v: 0, z: '#,##0' };
+      ws['Q8'] = { t: 'n', v: saldoAwal.rb || 0, z: '#,##0' };
+      ws['R8'] = { t: 'n', v: 0, z: '#,##0' };
+      ws['S8'] = { t: 'n', v: 0, z: '#,##0' };
+      ws['T8'] = { t: 'n', v: saldoAwal.bk || 0, z: '#,##0' };
+      ws['U8'] = { t: 'n', f: 'Q8+T8', v: saldoAwal.totalRombong || 0, z: '#,##0' };
+      ws['V8'] = { t: 'n', f: 'N8+U8', v: saldoAwal.total || 0, z: '#,##0' };
 
-      const rowSaldoAkhirHtml = `
-<tr style="background-color: #f1f5f9; font-weight: bold; font-size: 11px;">
-  <td style="border: 1px solid #cbd5e1; text-align: center; padding: 8px;">TOTAL PERIODIK</td>
-  <td style="border: 1px solid #cbd5e1; text-align: center; padding: 8px;"></td>
-  <td style="border: 1px solid #cbd5e1; text-align: left; padding: 8px;">REKAP TOTAL &amp; AKUMULASI SALDO AKHIR PERIODE</td>
-  <td style="border: 1px solid #cbd5e1; text-align: center; padding: 8px;"></td>
-  
-  <!-- rtTunai -->
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 8px; mso-number-format:'\\#\\,\\#\\#0';">=SUM(E5:E${lastDataRow})</td>
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 8px; mso-number-format:'\\#\\,\\#\\#0';">=SUM(F5:F${lastDataRow})</td>
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 8px; background-color: #fef3c7; mso-number-format:'\\#\\,\\#\\#0';">=G${lastDataRow}</td>
-  
-  <!-- rtPettyCash -->
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 8px; mso-number-format:'\\#\\,\\#\\#0';">=SUM(H5:H${lastDataRow})</td>
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 8px; mso-number-format:'\\#\\,\\#\\#0';">=SUM(I5:I${lastDataRow})</td>
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 8px; background-color: #e2e8f0; mso-number-format:'\\#\\,\\#\\#0';">=J${lastDataRow}</td>
-  
-  <!-- rtBank -->
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 8px; mso-number-format:'\\#\\,\\#\\#0';">=SUM(K5:K${lastDataRow})</td>
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 8px; mso-number-format:'\\#\\,\\#\\#0';">=SUM(L5:L${lastDataRow})</td>
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 8px; background-color: #c7d2fe; mso-number-format:'\\#\\,\\#\\#0';">=M${lastDataRow}</td>
-  
-  <!-- Total Saldo RT -->
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 8px; background-color: #fef3c7; mso-number-format:'\\#\\,\\#\\#0';">=N${lastDataRow}</td>
-  
-  <!-- rombongTunai -->
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 8px; mso-number-format:'\\#\\,\\#\\#0';">=SUM(O5:O${lastDataRow})</td>
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 8px; mso-number-format:'\\#\\,\\#\\#0';">=SUM(P5:P${lastDataRow})</td>
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 8px; background-color: #bae6fd; mso-number-format:'\\#\\,\\#\\#0';">=Q${lastDataRow}</td>
-  
-  <!-- rombongBank -->
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 8px; mso-number-format:'\\#\\,\\#\\#0';">=SUM(R5:R${lastDataRow})</td>
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 8px; mso-number-format:'\\#\\,\\#\\#0';">=SUM(S5:S${lastDataRow})</td>
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 8px; background-color: #bbf7d0; mso-number-format:'\\#\\,\\#\\#0';">=T${lastDataRow}</td>
-  
-  <!-- Total Saldo RB -->
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 8px; background-color: #e0f2fe; mso-number-format:'\\#\\,\\#\\#0';">=U${lastDataRow}</td>
-  
-  <!-- Grand Total Kas Umum -->
-  <td style="border: 1px solid #cbd5e1; text-align: right; padding: 8px; background-color: #e0e7ff; mso-number-format:'\\#\\,\\#\\#0';">=V${lastDataRow}</td>
-</tr>
-`;
+      // Rows 9+: Transaction rows
+      visibleTabularRows.forEach((row, idx) => {
+        const r = idx + 9;
+        const prevR = r - 1;
 
-      const fullExcelHtml = `
-<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
-<head>
-<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-<!--[if gte mso 9]><xml>
- <x:ExcelWorkbook>
-  <x:ExcelWorksheets>
-   <x:ExcelWorksheet>
-    <x:Name>Rekap Tabelaris Kas RT08</x:Name>
-    <x:WorksheetOptions>
-     <x:DisplayGridlines/>
-    </x:WorksheetOptions>
-   </x:ExcelWorksheet>
-  </x:ExcelWorksheets>
- </x:ExcelWorkbook>
-</xml><![endif]-->
-<style>
-  body { font-family: Arial, sans-serif; }
-  table { border-collapse: collapse; }
-  th, td { border: 1px solid #cbd5e1; font-family: Arial, sans-serif; }
-</style>
-</head>
-<body>
-  <h2>REKAP TABELARIS BUKU KAS RT 08 / RW 04</h2>
-  <h4>Periode: ${periodStr.replace(/_/g, ' ')}</h4>
-  <p style="font-size: 10px; color: #475569;">*File ini dilengkapi dengan formula Excel dinamis. Perubahan nilai Debit/Kredit akan otomatis memperbarui seluruh saldo.</p>
-  <table border="1">
-    <thead>
-      ${tableHeadersHtml}
-    </thead>
-    <tbody>
-      ${rowSaldoAwalHtml}
-      ${dataRowsHtml}
-      ${rowSaldoAkhirHtml}
-    </tbody>
-  </table>
-</body>
-</html>
-`;
+        ws[`A${r}`] = { t: 's', v: row.tanggal };
+        ws[`B${r}`] = { t: 's', v: row.noBukti };
+        ws[`C${r}`] = { t: 's', v: row.deskripsi };
+        ws[`D${r}`] = { t: 's', v: row.petugas };
 
-      const blob = new Blob(['\uFEFF' + fullExcelHtml], { type: 'application/vnd.ms-excel;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.setAttribute('href', url);
-      link.setAttribute('download', `Laporan_Tabelaris_Buku_Kas_RT08_${periodStr}.xls`);
-      link.style.visibility = 'hidden';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+        // rtTunai
+        ws[`E${r}`] = { t: 'n', v: row.rtTunaiDebit || 0, z: '#,##0' };
+        ws[`F${r}`] = { t: 'n', v: row.rtTunaiKredit || 0, z: '#,##0' };
+        ws[`G${r}`] = { t: 'n', f: `G${prevR}+E${r}-F${r}`, v: row.rtTunaiRunning, z: '#,##0' };
+
+        // rtPettyCash
+        ws[`H${r}`] = { t: 'n', v: row.rtPettyCashDebit || 0, z: '#,##0' };
+        ws[`I${r}`] = { t: 'n', v: row.rtPettyCashKredit || 0, z: '#,##0' };
+        ws[`J${r}`] = { t: 'n', f: `J${prevR}+H${r}-I${r}`, v: row.rtPettyCashRunning, z: '#,##0' };
+
+        // rtBank
+        ws[`K${r}`] = { t: 'n', v: row.rtBankDebit || 0, z: '#,##0' };
+        ws[`L${r}`] = { t: 'n', v: row.rtBankKredit || 0, z: '#,##0' };
+        ws[`M${r}`] = { t: 'n', f: `M${prevR}+K${r}-L${r}`, v: row.rtBankRunning, z: '#,##0' };
+
+        // Total Saldo RT
+        ws[`N${r}`] = { t: 'n', f: `G${r}+J${r}+M${r}`, v: row.totalRTRunning, z: '#,##0' };
+
+        // rombongTunai (rb)
+        ws[`O${r}`] = { t: 'n', v: row.rbDebit || 0, z: '#,##0' };
+        ws[`P${r}`] = { t: 'n', v: row.rbKredit || 0, z: '#,##0' };
+        ws[`Q${r}`] = { t: 'n', f: `Q${prevR}+O${r}-P${r}`, v: row.rbRunning, z: '#,##0' };
+
+        // rombongBank (bk)
+        ws[`R${r}`] = { t: 'n', v: row.bkDebit || 0, z: '#,##0' };
+        ws[`S${r}`] = { t: 'n', v: row.bkKredit || 0, z: '#,##0' };
+        ws[`T${r}`] = { t: 'n', f: `T${prevR}+R${r}-S${r}`, v: row.bkRunning, z: '#,##0' };
+
+        // Total Saldo RB
+        ws[`U${r}`] = { t: 'n', f: `Q${r}+T${r}`, v: row.totalRombongRunning, z: '#,##0' };
+
+        // Grand Total
+        ws[`V${r}`] = { t: 'n', f: `N${r}+U${r}`, v: row.totalRunning, z: '#,##0' };
+      });
+
+      const lastR = visibleTabularRows.length > 0 ? (8 + visibleTabularRows.length) : 8;
+      const sumR = lastR + 1;
+
+      // Summary row
+      ws[`A${sumR}`] = { t: 's', v: 'TOTAL PERIODIK' };
+      ws[`C${sumR}`] = { t: 's', v: 'REKAP TOTAL & AKUMULASI SALDO AKHIR PERIODE' };
+
+      ws[`E${sumR}`] = { t: 'n', f: `SUM(E9:E${lastR})`, v: totalsTabular.rtTunaiDebit, z: '#,##0' };
+      ws[`F${sumR}`] = { t: 'n', f: `SUM(F9:F${lastR})`, v: totalsTabular.rtTunaiKredit, z: '#,##0' };
+      ws[`G${sumR}`] = { t: 'n', f: `G${lastR}`, v: totalsTabular.rtTunaiRunning, z: '#,##0' };
+
+      ws[`H${sumR}`] = { t: 'n', f: `SUM(H9:H${lastR})`, v: totalsTabular.rtPettyCashDebit, z: '#,##0' };
+      ws[`I${sumR}`] = { t: 'n', f: `SUM(I9:I${lastR})`, v: totalsTabular.rtPettyCashKredit, z: '#,##0' };
+      ws[`J${sumR}`] = { t: 'n', f: `J${lastR}`, v: totalsTabular.rtPettyCashRunning, z: '#,##0' };
+
+      ws[`K${sumR}`] = { t: 'n', f: `SUM(K9:K${lastR})`, v: totalsTabular.rtBankDebit, z: '#,##0' };
+      ws[`L${sumR}`] = { t: 'n', f: `SUM(L9:L${lastR})`, v: totalsTabular.rtBankKredit, z: '#,##0' };
+      ws[`M${sumR}`] = { t: 'n', f: `M${lastR}`, v: totalsTabular.rtBankRunning, z: '#,##0' };
+
+      ws[`N${sumR}`] = { t: 'n', f: `G${sumR}+J${sumR}+M${sumR}`, v: totalsTabular.totalRTRunning, z: '#,##0' };
+
+      ws[`O${sumR}`] = { t: 'n', f: `SUM(O9:O${lastR})`, v: totalsTabular.rbDebit, z: '#,##0' };
+      ws[`P${sumR}`] = { t: 'n', f: `SUM(P9:P${lastR})`, v: totalsTabular.rbKredit, z: '#,##0' };
+      ws[`Q${sumR}`] = { t: 'n', f: `Q${lastR}`, v: totalsTabular.rbRunning, z: '#,##0' };
+
+      ws[`R${sumR}`] = { t: 'n', f: `SUM(R9:R${lastR})`, v: totalsTabular.bkDebit, z: '#,##0' };
+      ws[`S${sumR}`] = { t: 'n', f: `SUM(S9:S${lastR})`, v: totalsTabular.bkKredit, z: '#,##0' };
+      ws[`T${sumR}`] = { t: 'n', f: `T${lastR}`, v: totalsTabular.bkRunning, z: '#,##0' };
+
+      ws[`U${sumR}`] = { t: 'n', f: `Q${sumR}+T${sumR}`, v: totalsTabular.totalRombongRunning, z: '#,##0' };
+      ws[`V${sumR}`] = { t: 'n', f: `N${sumR}+U${sumR}`, v: totalsTabular.totalRunning, z: '#,##0' };
+
+      // Set sheet metadata
+      ws['!ref'] = `A1:V${sumR}`;
+      ws['!cols'] = [
+        { wch: 12 }, // A: Tanggal
+        { wch: 16 }, // B: No Bukti
+        { wch: 45 }, // C: Deskripsi
+        { wch: 22 }, // D: Petugas
+        { wch: 14 }, // E: rtTunai Debit
+        { wch: 14 }, // F: rtTunai Kredit
+        { wch: 16 }, // G: rtTunai Saldo
+        { wch: 14 }, // H: rtPettyCash Debit
+        { wch: 14 }, // I: rtPettyCash Kredit
+        { wch: 16 }, // J: rtPettyCash Saldo
+        { wch: 14 }, // K: rtBank Debit
+        { wch: 14 }, // L: rtBank Kredit
+        { wch: 16 }, // M: rtBank Saldo
+        { wch: 18 }, // N: Total Saldo RT
+        { wch: 14 }, // O: rb Debit
+        { wch: 14 }, // P: rb Kredit
+        { wch: 16 }, // Q: rb Saldo
+        { wch: 14 }, // R: bk Debit
+        { wch: 14 }, // S: bk Kredit
+        { wch: 16 }, // T: bk Saldo
+        { wch: 18 }, // U: Total Saldo RB
+        { wch: 20 }  // V: Grand Total Kas
+      ];
+
+      ws['!merges'] = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 21 } }, // Title
+        { s: { r: 1, c: 0 }, e: { r: 1, c: 21 } }, // Periode
+        { s: { r: 2, c: 0 }, e: { r: 2, c: 21 } }, // Note
+
+        // Table Header mergers
+        { s: { r: 4, c: 0 }, e: { r: 6, c: 0 } }, // A5:A7 TANGGAL
+        { s: { r: 4, c: 1 }, e: { r: 6, c: 1 } }, // B5:B7 NO BUKTI
+        { s: { r: 4, c: 2 }, e: { r: 6, c: 2 } }, // C5:C7 DESKRIPSI
+        { s: { r: 4, c: 3 }, e: { r: 6, c: 3 } }, // D5:D7 PETUGAS
+        { s: { r: 4, c: 4 }, e: { r: 4, c: 13 } }, // E5:N5 TOTAL KAS RT
+        { s: { r: 4, c: 14 }, e: { r: 4, c: 20 } }, // O5:U5 TOTAL KAS ROMBONG
+        { s: { r: 4, c: 21 }, e: { r: 6, c: 21 } }, // V5:V7 GRAND TOTAL KAS
+
+        { s: { r: 5, c: 4 }, e: { r: 5, c: 6 } }, // E6:G6 IURAN RT
+        { s: { r: 5, c: 7 }, e: { r: 5, c: 9 } }, // H6:J6 KAS KECIL
+        { s: { r: 5, c: 10 }, e: { r: 5, c: 12 } }, // K6:M6 RT BANK
+        { s: { r: 5, c: 13 }, e: { r: 6, c: 13 } }, // N6:N7 TOTAL SALDO RT
+        { s: { r: 5, c: 14 }, e: { r: 5, c: 16 } }, // O6:Q6 ROMBONG TUNAI
+        { s: { r: 5, c: 17 }, e: { r: 5, c: 19 } }, // R6:T6 ROMBONG BANK
+        { s: { r: 5, c: 20 }, e: { r: 6, c: 20 } }  // U6:U7 TOTAL SALDO RB
+      ];
+
+      XLSX.utils.book_append_sheet(wb, ws, 'Rekap Tabelaris Kas RT08');
+      XLSX.writeFile(wb, `Laporan_Tabelaris_Buku_Kas_RT08_${periodStr}.xlsx`);
 
     } else {
-      // 2. Export in original single-line ledger layout
-      const headers = ['No', 'Tanggal', 'Deskripsi/Keterangan', 'Kategori', 'Petugas', 'Akun Kas', 'Tipe', 'Nominal (Rp)'];
-      
-      const rows = [...filteredLedger]
-        .sort((a, b) => {
-          if (a.tanggal !== b.tanggal) {
-            return a.tanggal.localeCompare(b.tanggal);
-          }
-          return (a.id || '').localeCompare(b.id || '');
-        })
-        .map((entry, idx) => [
+      // 2. Export standard ledger report in XLSX
+      const wb = XLSX.utils.book_new();
+      const wsData: any[][] = [
+        ['LAPORAN BUKU KAS UMUM RT 08 / RW 04'],
+        [`Periode: ${periodDisplayTitle}`],
+        [''],
+        ['No', 'Tanggal', 'No Bukti', 'Keterangan Transaksi', 'Kategori', 'Petugas', 'Akun Kas', 'Tipe', 'Debit / Pemasukan (Rp)', 'Kredit / Pengeluaran (Rp)', 'Saldo Kas (Rp)']
+      ];
+
+      let runningBal = 0;
+      const sortedEntries = [...filteredLedger].sort((a, b) => {
+        if (a.tanggal !== b.tanggal) return a.tanggal.localeCompare(b.tanggal);
+        return (a.id || '').localeCompare(b.id || '');
+      });
+
+      sortedEntries.forEach((entry, idx) => {
+        const isDebit = entry.tipe === 'pemasukan';
+        const debit = isDebit ? entry.jumlah : 0;
+        const kredit = !isDebit ? entry.jumlah : 0;
+        runningBal += isDebit ? entry.jumlah : -entry.jumlah;
+
+        wsData.push([
           idx + 1,
           entry.tanggal,
-          `"${entry.deskripsi.replace(/"/g, '""')}"`,
-          `"${entry.kategori.replace(/"/g, '""')}"`,
-          `"${entry.petugas.replace(/"/g, '""')}"`,
+          entry.noBukti || '-',
+          entry.deskripsi,
+          entry.kategori,
+          entry.petugas,
           entry.sumberKas,
-          entry.tipe === 'pemasukan' ? 'Pemasukan' : 'Pengeluaran',
-          entry.jumlah
+          isDebit ? 'Pemasukan' : 'Pengeluaran',
+          debit,
+          kredit,
+          runningBal
         ]);
+      });
 
-      const emptyRow = ['', '', '', '', '', '', '', ''];
-      const rowTotalPemasukan = ['', '', 'Total Debit (Pemasukan)', '', '', '', '', totalPemasukan];
-      const rowTotalPengeluaran = ['', '', 'Total Kredit (Pengeluaran)', '', '', '', '', totalPengeluaran];
-      const rowSaldoBersih = ['', '', 'Saldo Bersih Periode', '', '', '', '', saldoBersih];
+      wsData.push(['']);
+      wsData.push(['', '', '', 'TOTAL PEMASUKAN (DEBIT)', '', '', '', '', totalPemasukan, 0, '']);
+      wsData.push(['', '', '', 'TOTAL PENGELUARAN (KREDIT)', '', '', '', '', 0, totalPengeluaran, '']);
+      wsData.push(['', '', '', 'SALDO BERSIH PERIODE', '', '', '', '', saldoBersih, '', '']);
 
-      const csvContent = [
-        headers.join(','),
-        ...rows.map(e => e.join(',')),
-        emptyRow.join(','),
-        rowTotalPemasukan.join(','),
-        rowTotalPengeluaran.join(','),
-        rowSaldoBersih.join(',')
-      ].join('\n');
+      const ws = XLSX.utils.aoa_to_sheet(wsData);
+      ws['!cols'] = [
+        { wch: 6 },
+        { wch: 12 },
+        { wch: 16 },
+        { wch: 45 },
+        { wch: 20 },
+        { wch: 20 },
+        { wch: 15 },
+        { wch: 14 },
+        { wch: 22 },
+        { wch: 22 },
+        { wch: 20 }
+      ];
 
-      const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.setAttribute('href', url);
-      
-      let periodStr = 'Semua_Periode';
-      if (selectedYear !== 'semua') {
-        periodStr = `${selectedYear}`;
-        if (selectedMonth !== 'semua') {
-          const monthIndex = parseInt(selectedMonth, 10) - 1;
-          const name = INDO_MONTHS[monthIndex]?.name || 'Bulan';
-          periodStr = `${name}_${selectedYear}`;
-        }
-      }
-
-      link.setAttribute('download', `Laporan_Buku_Kas_RT08_${periodStr}.csv`);
-      link.style.visibility = 'hidden';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      XLSX.utils.book_append_sheet(wb, ws, 'Buku Kas RT08');
+      XLSX.writeFile(wb, `Laporan_Buku_Kas_RT08_${periodStr}.xlsx`);
     }
   };
 

@@ -1540,7 +1540,7 @@ export default function App() {
           wargaInitCheckDone.current = true;
           if (wargaList.length > 0) {
             wargaList.forEach((w) => {
-              setDoc(doc(db, 'warga_bills', w.id), w)
+              setDoc(doc(db, 'warga_bills', w.id), sanitizeData(w))
                 .catch((err) => handleFirestoreError(err, OperationType.WRITE, `warga_bills/${w.id}`));
             });
           }
@@ -3182,14 +3182,14 @@ export default function App() {
                             iuranRT: w.iuranRT.map(slot => ({ 
                               ...slot, 
                               lunas: false, 
-                              tanggalBayar: undefined, 
-                              jamBayar: undefined, 
-                              fotoBase64: undefined, 
-                              fotoNamaFile: undefined 
+                              tanggalBayar: '', 
+                              jamBayar: '', 
+                              fotoBase64: '', 
+                              fotoNamaFile: '' 
                             }))
                           }));
                           for (const w of updatedWargaList) {
-                            await setDoc(doc(db, 'warga_bills', w.id), w);
+                            await setDoc(doc(db, 'warga_bills', w.id), sanitizeData(w));
                           }
 
                           // 4. Mark all rombong bills in Firestore as unpaid
@@ -3198,14 +3198,14 @@ export default function App() {
                             iuranRombong: r.iuranRombong.map(slot => ({ 
                               ...slot, 
                               lunas: false, 
-                              tanggalBayar: undefined, 
-                              jamBayar: undefined, 
-                              fotoBase64: undefined, 
-                              fotoNamaFile: undefined 
+                              tanggalBayar: '', 
+                              jamBayar: '', 
+                              fotoBase64: '', 
+                              fotoNamaFile: '' 
                             }))
                           }));
                           for (const r of updatedRombongList) {
-                            await setDoc(doc(db, 'rombong_bills', r.id), r);
+                            await setDoc(doc(db, 'rombong_bills', r.id), sanitizeData(r));
                           }
 
                           // Sync local states
