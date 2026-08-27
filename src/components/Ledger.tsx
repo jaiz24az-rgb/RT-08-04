@@ -3,6 +3,7 @@ import { LedgerEntry, Balance, AppUser, WargaBill, RombongBill } from '../types'
 import { getBase64SizeInBytes, formatFileSize } from '../utils/fileSizeUtils';
 import { compressImage } from '../utils/fileCompressor';
 import ImageCropperModal from './ImageCropperModal';
+import DateRangePicker from './DateRangePicker';
 import { 
   FileText, 
   ArrowUpRight, 
@@ -1729,26 +1730,26 @@ export default function Ledger({
             </div>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-amber-50/40 border border-amber-200/60 rounded-xl p-3">
-            <div>
-              <label className="block text-[11px] font-bold text-slate-700 mb-1">Tanggal Mulai (Awal):</label>
-              <input
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                className="w-full bg-white border border-slate-250 rounded-xl px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500 font-mono"
-              />
+          <div className="bg-amber-50/50 border border-amber-200/80 rounded-2xl p-4 space-y-2">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+              <label className="block text-xs font-extrabold text-slate-800 flex items-center gap-1.5">
+                <Calendar className="w-4 h-4 text-amber-600" />
+                <span>Pilih Rentang Tanggal Transaksi:</span>
+              </label>
+              <span className="text-[11px] text-slate-500 font-medium">Kalender 2 Bulan (Dual View) &amp; Preset Cepat</span>
             </div>
-
-            <div>
-              <label className="block text-[11px] font-bold text-slate-700 mb-1">Tanggal Akhir (Sampai):</label>
-              <input
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                className="w-full bg-white border border-slate-250 rounded-xl px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500 font-mono"
-              />
-            </div>
+            
+            <DateRangePicker
+              startDate={startDate}
+              endDate={endDate}
+              onChange={(start, end) => {
+                setStartDate(start);
+                setEndDate(end);
+              }}
+              placeholder="Klik untuk memilih rentang tanggal transaksi..."
+              className="w-full"
+              buttonClassName="bg-white py-3 border-amber-300 shadow-xs"
+            />
           </div>
         )}
 

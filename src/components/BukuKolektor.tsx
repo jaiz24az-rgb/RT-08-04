@@ -6,6 +6,7 @@ import {
   isPenarikanKolektor, 
   getCollectorBalancesForPeriod 
 } from '../utils/collectorUtils';
+import DateRangePicker from './DateRangePicker';
 import { 
   BookOpen, 
   Coins, 
@@ -72,6 +73,9 @@ export default function BukuKolektor({
 
   const [selectedYear, setSelectedYear] = useState<number>(currentYear);
   const [selectedMonth, setSelectedMonth] = useState<number | 'semua'>(currentMonth);
+  const [filterDateMode, setFilterDateMode] = useState<'monthYear' | 'range'>('monthYear');
+  const [startDate, setStartDate] = useState<string>('');
+  const [endDate, setEndDate] = useState<string>('');
   const [activeSubTab, setActiveSubTab] = useState<'tunai' | 'bank' | 'penarikan_kolektor' | 'setor_bank'>('tunai');
   const [searchTerm, setSearchTerm] = useState('');
   
@@ -142,10 +146,16 @@ export default function BukuKolektor({
   });
 
   const monthlyLedger = allowedLedger.filter(entry => {
-    const { year, month } = parseEntryDate(entry.tanggal);
-    const matchesYear = year === selectedYear;
-    const matchesMonth = selectedMonth === 'semua' || month === selectedMonth;
-    return matchesYear && matchesMonth;
+    if (filterDateMode === 'range') {
+      if (startDate && entry.tanggal < startDate) return false;
+      if (endDate && entry.tanggal > endDate) return false;
+      return true;
+    } else {
+      const { year, month } = parseEntryDate(entry.tanggal);
+      const matchesYear = year === selectedYear;
+      const matchesMonth = selectedMonth === 'semua' || month === selectedMonth;
+      return matchesYear && matchesMonth;
+    }
   });
 
   // 3. Math calculations for Tunai vs Bank collections
@@ -410,35 +420,72 @@ export default function BukuKolektor({
         </div>
 
         {/* Dynamic Filters Bar - Compact */}
-        <div className="mt-4 pt-4 border-t border-white/10 flex flex-wrap gap-2 items-center justify-between">
+        <div className="mt-4 pt-4 border-t border-white/10 flex flex-wrap gap-3 items-center justify-between">
           <div className="flex flex-wrap items-center gap-2">
             <div className="flex items-center gap-1 bg-slate-800/40 border border-white/15 px-2 py-1 rounded-lg text-[10px] text-slate-200 font-mono">
               <Filter className="w-3 h-3 text-slate-300" />
               <span>Saring Data:</span>
             </div>
 
-            {/* Year Selector */}
-            <select
-              value={selectedYear}
-              onChange={(e) => setSelectedYear(parseInt(e.target.value, 10))}
-              className="bg-white border border-slate-200 text-slate-900 font-bold text-[11px] py-1 px-2 rounded-lg focus:outline-none focus:ring-1 focus:ring-purple-400 font-mono cursor-pointer transition hover:bg-slate-50"
-            >
-              {yearsList.map(y => (
-                <option key={y} value={y} className="bg-white text-slate-900 font-mono">{y} Masehi</option>
-              ))}
-            </select>
+            {/* Mode Switch: Bulan/Tahun vs Rentang Tanggal */}
+            <div className="flex items-center bg-black/20 p-0.5 rounded-lg border border-white/15 text-[10px] font-bold">
+              <button
+                type="button"
+                onClick={() => setFilterDateMode('monthYear')}
+                className={`px-2 py-1 rounded-md transition cursor-pointer ${
+                  filterDateMode === 'monthYear' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-200 hover:text-white'
+                }`}
+              >
+                Bulan &amp; Tahun
+              </button>
+              <button
+                type="button"
+                onClick={() => setFilterDateMode('range')}
+                className={`px-2 py-1 rounded-md transition cursor-pointer ${
+                  filterDateMode === 'range' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-200 hover:text-white'
+                }`}
+              >
+                Rentang 2 Bulan
+              </button>
+            </div>
 
-            {/* Month Selector */}
-            <select
-              value={selectedMonth}
-              onChange={(e) => setSelectedMonth(e.target.value === 'semua' ? 'semua' : parseInt(e.target.value, 10))}
-              className="bg-white border border-slate-200 text-slate-900 font-bold text-[11px] py-1 px-2 rounded-lg focus:outline-none focus:ring-1 focus:ring-purple-400 font-sans cursor-pointer transition hover:bg-slate-50"
-            >
-              <option value="semua" className="bg-white text-slate-900 font-sans font-bold">Semua Bulan Kumulatif</option>
-              {INDONESIAN_MONTHS.map(m => (
-                <option key={m.value} value={m.value} className="bg-white text-slate-900 font-sans">{m.label}</option>
-              ))}
-            </select>
+            {filterDateMode === 'monthYear' ? (
+              <>
+                {/* Year Selector */}
+                <select
+                  value={selectedYear}
+                  onChange={(e) => setSelectedYear(parseInt(e.target.value, 10))}
+                  className="bg-white border border-slate-200 text-slate-900 font-bold text-[11px] py-1 px-2 rounded-lg focus:outline-none focus:ring-1 focus:ring-purple-400 font-mono cursor-pointer transition hover:bg-slate-50"
+                >
+                  {yearsList.map(y => (
+                    <option key={y} value={y} className="bg-white text-slate-900 font-mono">{y} Masehi</option>
+                  ))}
+                </select>
+
+                {/* Month Selector */}
+                <select
+                  value={selectedMonth}
+                  onChange={(e) => setSelectedMonth(e.target.value === 'semua' ? 'semua' : parseInt(e.target.value, 10))}
+                  className="bg-white border border-slate-200 text-slate-900 font-bold text-[11px] py-1 px-2 rounded-lg focus:outline-none focus:ring-1 focus:ring-purple-400 font-sans cursor-pointer transition hover:bg-slate-50"
+                >
+                  <option value="semua" className="bg-white text-slate-900 font-sans font-bold">Semua Bulan Kumulatif</option>
+                  {INDONESIAN_MONTHS.map(m => (
+                    <option key={m.value} value={m.value} className="bg-white text-slate-900 font-sans">{m.label}</option>
+                  ))}
+                </select>
+              </>
+            ) : (
+              <DateRangePicker
+                startDate={startDate}
+                endDate={endDate}
+                onChange={(s, e) => {
+                  setStartDate(s);
+                  setEndDate(e);
+                }}
+                placeholder="Pilih rentang tanggal..."
+                buttonClassName="bg-white text-slate-900 font-bold py-1 px-2.5 rounded-lg text-[11px] border-0"
+              />
+            )}
           </div>
 
           <div className="flex items-center gap-2">
