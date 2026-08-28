@@ -729,46 +729,57 @@ export default function Dashboard({
 
             {/* Rincian Komprehensif Seluruh Rekening & Kas RT */}
             {!isKolektor && !isKolektor2 && (
-              <div className="mt-2 pl-5 border-l border-slate-700 flex flex-col gap-2.5 text-[11px] text-slate-400 font-mono leading-relaxed">
+              <div className="mt-3 pl-5 border-l-2 border-slate-700/80 flex flex-col gap-2.5 text-[11px] text-slate-300 font-mono leading-relaxed bg-slate-950/40 p-3.5 rounded-xl border border-slate-800/60">
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 shrink-0" />
-                  <span className="text-slate-300 font-semibold">Kas Kecil RT (Petty Cash):</span>
-                  <span className="text-indigo-300 font-bold">Rp {activeKas.rtPettyCash.toLocaleString('id-ID')}</span>
+                  <span className="w-2 h-2 rounded-full bg-indigo-400 shrink-0" />
+                  <span className="text-slate-200 font-bold">Kas Kecil RT (Petty Cash):</span>
+                  <span className="text-indigo-300 font-extrabold text-xs">Rp {activeKas.rtPettyCash.toLocaleString('id-ID')}</span>
                   <span className="text-[10px] text-slate-400 font-sans">
                     (Masuk: <span className="text-emerald-400 font-mono font-bold">Rp {pettyCashBreakdown.totalMasuk.toLocaleString('id-ID')}</span> | Keluar: <span className="text-rose-400 font-mono font-bold">Rp {pettyCashBreakdown.totalKeluar.toLocaleString('id-ID')}</span>)
                   </span>
                 </div>
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
-                  <span className="text-slate-300 font-semibold">Iuran RT Tunai:</span>
-                  <span className="text-amber-300 font-bold">Rp {activeKas.rtTunai.toLocaleString('id-ID')}</span>
+                  <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />
+                  <span className="text-slate-200 font-bold">Iuran RT Tunai:</span>
+                  <span className="text-amber-300 font-extrabold text-xs">Rp {activeKas.rtTunai.toLocaleString('id-ID')}</span>
                   <span className="text-[10px] text-slate-400 font-sans">
                     (Masuk: <span className="text-emerald-400 font-mono font-bold">Rp {rtTunaiBreakdown.totalMasuk.toLocaleString('id-ID')}</span> | Keluar: <span className="text-rose-400 font-mono font-bold">Rp {rtTunaiBreakdown.totalKeluar.toLocaleString('id-ID')}</span>)
                   </span>
                 </div>
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-sky-400 shrink-0" />
-                  <span className="text-slate-300 font-semibold">Kas Umum Bank RT:</span>
-                  <span className="text-sky-300 font-bold">Rp {activeKas.rtBank.toLocaleString('id-ID')}</span>
+                  <span className="w-2 h-2 rounded-full bg-sky-400 shrink-0" />
+                  <span className="text-slate-200 font-bold">Kas Umum Bank RT:</span>
+                  <span className="text-sky-300 font-extrabold text-xs">Rp {activeKas.rtBank.toLocaleString('id-ID')}</span>
                   <span className="text-[10px] text-slate-400 font-sans">
                     (Masuk: <span className="text-emerald-400 font-mono font-bold">Rp {rtBankBreakdown.totalMasuk.toLocaleString('id-ID')}</span> | Keluar: <span className="text-rose-400 font-mono font-bold">Rp {rtBankBreakdown.totalKeluar.toLocaleString('id-ID')}</span>)
                   </span>
                 </div>
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-teal-400 shrink-0" />
-                  <span className="text-slate-300 font-semibold">Kas Bank Rombong:</span>
-                  <span className="text-teal-300 font-bold">Rp {activeKas.rombongBank.toLocaleString('id-ID')}</span>
+                  <span className="w-2 h-2 rounded-full bg-teal-400 shrink-0" />
+                  <span className="text-slate-200 font-bold">Kas Bank Rombong:</span>
+                  <span className="text-teal-300 font-extrabold text-xs">Rp {activeKas.rombongBank.toLocaleString('id-ID')}</span>
                   <span className="text-[10px] text-slate-400 font-sans">
                     (Masuk: <span className="text-emerald-400 font-mono font-bold">Rp {rombongBankBreakdown.totalMasuk.toLocaleString('id-ID')}</span> | Keluar: <span className="text-rose-400 font-mono font-bold">Rp {rombongBankBreakdown.totalKeluar.toLocaleString('id-ID')}</span>)
                   </span>
                 </div>
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
-                  <span className="text-slate-300 font-semibold">Kas Rombong Tunai:</span>
-                  <span className="text-emerald-300 font-bold">Rp {activeKas.rombongTunai.toLocaleString('id-ID')}</span>
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
+                  <span className="text-slate-200 font-bold">Kas Rombong Tunai:</span>
+                  <span className="text-emerald-300 font-extrabold text-xs">Rp {activeKas.rombongTunai.toLocaleString('id-ID')}</span>
                   <span className="text-[10px] text-slate-400 font-sans">
                     (Masuk: <span className="text-emerald-400 font-mono font-bold">Rp {rombongTunaiBreakdown.totalMasuk.toLocaleString('id-ID')}</span> | Keluar: <span className="text-rose-400 font-mono font-bold">Rp {rombongTunaiBreakdown.totalKeluar.toLocaleString('id-ID')}</span>)
                   </span>
+                </div>
+
+                {/* Total Rekening Bank Gabungan RT & Rombong */}
+                <div className="pt-2.5 mt-1 border-t border-slate-700/60 flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-cyan-400 shrink-0 animate-pulse" />
+                    <span className="text-cyan-200 font-bold text-xs uppercase tracking-wide">Total Saldo di Bank (Bank RT + Bank Rombong):</span>
+                  </div>
+                  <div className="text-cyan-300 font-mono font-black text-sm sm:text-base bg-cyan-950/60 px-3 py-1 rounded-lg border border-cyan-500/30 shadow-xs">
+                    Rp {(activeKas.rtBank + activeKas.rombongBank).toLocaleString('id-ID')}
+                  </div>
                 </div>
               </div>
             )}
