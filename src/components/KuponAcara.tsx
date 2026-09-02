@@ -120,6 +120,8 @@ export const KuponAcara: React.FC<KuponAcaraProps> = ({
   // Event Action Modal State (Selesai Acara vs Hapus Permanen)
   const [showActionConfirmModal, setShowActionConfirmModal] = useState(false);
   const [eventForAction, setEventForAction] = useState<EventCoupon | null>(null);
+  const [confirmDeleteStep, setConfirmDeleteStep] = useState(false);
+  const [isDeletingEvent, setIsDeletingEvent] = useState(false);
 
   // Form states for Event Ledger Expense
   const [expType, setExpType] = useState<'pemasukan' | 'pengeluaran'>('pengeluaran');
@@ -343,9 +345,22 @@ export const KuponAcara: React.FC<KuponAcaraProps> = ({
     };
   }, [eventOrders, searchKeyword, filterStatus, filterBlok, reportSortBy]);
 
-  // Active Residents in RT (not deleted & not non-active)
+  // Active Residents in RT (only truly active, not deleted & not non-active/pindah)
   const activeWargaList = useMemo(() => {
-    return (wargaList || []).filter(w => !w.isDeleted && w.statusKeaktifan !== 'nonaktif');
+    return (wargaList || []).filter(w => !w.isDeleted && (!w.statusKeaktifan || w.statusKeaktifan === 'aktif'));
+  }, [wargaList]);
+
+  // All selectable warga for buying coupons (active & inactive, sorted nicely)
+  const allSelectableWarga = useMemo(() => {
+    return [...(wargaList || [])]
+      .filter(w => !w.isDeleted)
+      .sort((a, b) => {
+        const blokA = a.blok || '';
+        const blokB = b.blok || '';
+        const cmp = blokA.localeCompare(blokB, undefined, { numeric: true });
+        if (cmp !== 0) return cmp;
+        return (a.noRumah || '').localeCompare(b.noRumah || '', undefined, { numeric: true });
+      });
   }, [wargaList]);
 
   // Unique Blocks in RT for filtering
@@ -672,6 +687,7 @@ export const KuponAcara: React.FC<KuponAcaraProps> = ({
   // Open Action Modal (Pilihan Selesai Acara vs Hapus Permanen)
   const handleOpenActionModal = (event: EventCoupon) => {
     setEventForAction(event);
+    setConfirmDeleteStep(false);
     setShowActionConfirmModal(true);
   };
 
@@ -687,15 +703,23 @@ export const KuponAcara: React.FC<KuponAcaraProps> = ({
 
   // Hapus permanen acara dari database
   const handlePermanentDelete = async (event: EventCoupon) => {
-    await onDeleteEvent(event.id);
-    const remaining = events.filter(e => e.id !== event.id);
-    if (remaining.length > 0) {
-      setSelectedEventId(remaining[0].id);
-    } else {
-      setSelectedEventId('');
+    try {
+      setIsDeletingEvent(true);
+      await onDeleteEvent(event.id);
+      const remaining = events.filter(e => e.id !== event.id);
+      if (remaining.length > 0) {
+        setSelectedEventId(remaining[0].id);
+      } else {
+        setSelectedEventId('');
+      }
+      setShowActionConfirmModal(false);
+      setShowEventModal(false);
+      setConfirmDeleteStep(false);
+    } catch (err) {
+      console.error('Gagal menghapus acara:', err);
+    } finally {
+      setIsDeletingEvent(false);
     }
-    setShowActionConfirmModal(false);
-    setShowEventModal(false);
   };
 
   // Open New/Edit Event Modal
@@ -2785,11 +2809,17 @@ Salam Hangat,
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-red-500"
                   >
                     <option value="">-- Pilih Nama Warga &amp; Blok --</option>
-                    {wargaList.map(w => (
-                      <option key={w.id} value={w.id}>
-                        {w.blok}/{w.noRumah} - {w.nama}
-                      </option>
-                    ))}
+                    {allSelectableWarga.map(w => {
+                      const isNonAktif = w.statusKeaktifan && w.statusKeaktifan !== 'aktif';
+                      const statusLabel = isNonAktif 
+                        ? ` [${w.statusKeaktifan === 'pindah_sementara' ? 'Pindah Sementara' : 'Non-Aktif'}]` 
+                        : '';
+                      return (
+                        <option key={w.id} value={w.id}>
+                          {w.blok}/{w.noRumah} - {w.nama}{statusLabel}
+                        </option>
+                      );
+                    })}
                   </select>
                 </div>
               ) : (
@@ -3692,7 +3722,7 @@ Salam Hangat,
                   <div className="p-2 bg-rose-100 text-rose-700 rounded-xl shrink-0 mt-0.5">
                     <Trash2 className="w-5 h-5" />
                   </div>
-                  <div className="flex-1 space-y-1">
+                  <div className="flex-1 space-y-2">
                     <div className="flex items-center justify-between">
                       <h4 className="font-extrabold text-xs text-rose-950">2. Hapus Acara Permanen</h4>
                       <span className="text-[10px] font-bold bg-rose-200 text-rose-900 px-2 py-0.5 rounded-md">
@@ -3702,20 +3732,46 @@ Salam Hangat,
                     <p className="text-[11px] text-rose-800 leading-relaxed">
                       Menghapus acara ini beserta seluruh data kupon, nomor seri, dan catatan kas secara permanen dari sistem database. Tindakan ini <strong>tidak dapat dikembalikan</strong>.
                     </p>
-                    <div className="pt-2">
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          if (window.confirm(`KONFIRMASI AKHIR:\n\nApakah Anda benar-benar yakin ingin MENGHAPUS PERMANEN acara "${eventForAction.namaAcara}"?\n\nSemua data nomor kupon dan pembukuan akan hilang.`)) {
-                            await handlePermanentDelete(eventForAction);
-                          }
-                        }}
-                        className="w-full py-2.5 px-4 bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs rounded-xl shadow-xs transition flex items-center justify-center gap-2 cursor-pointer active:scale-95"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                        <span>Hapus Permanen Dari Database</span>
-                      </button>
-                    </div>
+
+                    {!confirmDeleteStep ? (
+                      <div className="pt-1">
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDeleteStep(true)}
+                          className="w-full py-2.5 px-4 bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs rounded-xl shadow-xs transition flex items-center justify-center gap-2 cursor-pointer active:scale-95"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                          <span>Hapus Permanen Dari Database</span>
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="bg-rose-100/90 border border-rose-300 rounded-xl p-3 space-y-2.5 animate-in fade-in duration-150">
+                        <div className="flex items-start gap-2 text-rose-950">
+                          <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                          <p className="text-xs font-bold leading-snug">
+                            Konfirmasi Terakhir: Anda yakin ingin menghapus permanen acara <span className="underline">"{eventForAction.namaAcara}"</span>?
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2 pt-1">
+                          <button
+                            type="button"
+                            disabled={isDeletingEvent}
+                            onClick={() => handlePermanentDelete(eventForAction)}
+                            className="flex-1 py-2 px-3 bg-rose-700 hover:bg-rose-800 disabled:bg-rose-400 text-white font-extrabold text-xs rounded-lg shadow-xs transition flex items-center justify-center gap-1.5 cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>{isDeletingEvent ? 'Menghapus...' : 'Ya, Hapus Sekarang'}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteStep(false)}
+                            className="py-2 px-3.5 bg-white hover:bg-slate-100 text-slate-700 font-bold text-xs rounded-lg border border-slate-200 cursor-pointer transition"
+                          >
+                            Batal
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

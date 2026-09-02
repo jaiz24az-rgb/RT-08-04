@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import * as XLSX from 'xlsx';
 import { LedgerEntry, Balance, AppUser, WargaBill, RombongBill } from '../types';
+import { isInternalMutationOrTransfer } from '../utils/mutationUtils';
 import { getBase64SizeInBytes, formatFileSize } from '../utils/fileSizeUtils';
 import { compressImage } from '../utils/fileCompressor';
 import ImageCropperModal from './ImageCropperModal';
@@ -767,12 +768,13 @@ export default function Ledger({
   // Precompute perfect running balances on the complete sequence of transactions (including corrections)
   const allSortedWithBalances = React.useMemo(() => {
     const mapped = ledger.map(entry => {
-      let kategori = entry.kategori;
       const originalKategori = entry.kategori;
+      let kategori = entry.kategori;
       const catLower = (kategori || '').toLowerCase();
-      if (catLower.includes('rombong')) {
+      const src = entry.sumberKas;
+      if (src === 'rombongTunai' || src === 'rombongBank' || catLower.includes('rombong')) {
         kategori = 'Kas Rombong';
-      } else if (catLower.includes('petty') || catLower.includes('kecil')) {
+      } else if (src === 'rtPettyCash' || catLower.includes('petty') || catLower.includes('kecil')) {
         kategori = 'Petty Kas';
       } else {
         kategori = 'Kas Umum RT';
@@ -1049,84 +1051,6 @@ export default function Ledger({
 
     return matchesSearch && matchesType && matchesCategory && matchesDate;
   });
-
-  // Universal helper to detect internal non-operational transfers (mutasi bank, petty cash transfer, alokasi dana, etc.)
-  const isInternalMutationOrTransfer = (e: any): boolean => {
-    if (!e) return false;
-    const orig = ((e.originalKategori || e.kategori) || '').toLowerCase().trim();
-    const cat = (e.kategori || '').toLowerCase().trim();
-    const desc = (e.deskripsi || '').toLowerCase().trim();
-
-    // 1. Exact Category / Tag Match
-    if (
-      orig === 'setor bank' ||
-      orig === 'mutasi bank-petty' ||
-      orig === 'mutasi bank-kas' ||
-      orig === 'mutasi kas' ||
-      orig === 'transfer kas' ||
-      orig === 'penarikan dana kolektor' ||
-      orig === 'penyesuaian saldo' ||
-      cat === 'setor bank' ||
-      cat === 'mutasi bank-petty' ||
-      cat === 'mutasi bank-kas' ||
-      cat === 'mutasi kas' ||
-      cat === 'transfer kas' ||
-      cat === 'penarikan dana kolektor' ||
-      cat === 'penyesuaian saldo'
-    ) {
-      return true;
-    }
-
-    // 2. Keyword Match in Category
-    if (
-      orig.includes('mutasi') ||
-      orig.includes('setor bank') ||
-      orig.includes('pemindahbukuan') ||
-      orig.includes('penarikan dana kolektor') ||
-      orig.includes('alokasi dana') ||
-      cat.includes('mutasi') ||
-      cat.includes('setor bank') ||
-      cat.includes('pemindahbukuan') ||
-      cat.includes('penarikan dana kolektor') ||
-      cat.includes('alokasi dana')
-    ) {
-      return true;
-    }
-
-    // 3. Keyword Match in Description (all variants of petty cash, bank, and cash transfers)
-    if (
-      desc.includes('mutasi') ||
-      desc.includes('setor bank') ||
-      desc.includes('pemindahbukuan') ||
-      desc.includes('penarikan dana kolektor') ||
-      desc.includes('alokasi dana') ||
-      desc.includes('pengembalian dana') ||
-      desc.includes('petty cash ke') ||
-      desc.includes('ke petty cash') ||
-      desc.includes('petty ke') ||
-      desc.includes('ke petty') ||
-      desc.includes('kas kecil ke') ||
-      desc.includes('ke kas kecil') ||
-      desc.includes('dari kas kecil') ||
-      desc.includes('dari petty cash') ||
-      desc.includes('isi kas kecil') ||
-      desc.includes('mengisi kas kecil') ||
-      desc.includes('pengisian kas kecil') ||
-      desc.includes('tarik kas bank') ||
-      desc.includes('tarik dari bank') ||
-      desc.includes('penyetoran sisa') ||
-      desc.includes('penyesuaian saldo') ||
-      desc.includes('saldo opname') ||
-      desc.includes('transfer kas') ||
-      desc.includes('transfer antar') ||
-      desc.includes('pindah kas') ||
-      desc.includes('pindah dana')
-    ) {
-      return true;
-    }
-
-    return false;
-  };
 
   const totalPemasukan = filteredLedger
     .filter(e => 
@@ -1967,7 +1891,7 @@ export default function Ledger({
               <div className="bg-slate-900/60 p-2.5 rounded-xl border border-emerald-500/20 space-y-1">
                 <p className="text-[10px] font-bold text-emerald-400 flex items-center gap-1">
                   <ArrowDownLeft className="w-3 h-3 text-emerald-400" />
-                  Debit (Masuk)
+                  Debit (Masuk Riil)
                 </p>
                 <p className="text-xs sm:text-sm font-black font-mono text-emerald-300">
                   Rp {quickSummary.rtDebit.toLocaleString('id-ID')}
@@ -1977,7 +1901,7 @@ export default function Ledger({
               <div className="bg-slate-900/60 p-2.5 rounded-xl border border-rose-500/20 space-y-1">
                 <p className="text-[10px] font-bold text-rose-400 flex items-center gap-1">
                   <ArrowUpRight className="w-3 h-3 text-rose-400" />
-                  Kredit (Keluar)
+                  Kredit (Keluar Riil)
                 </p>
                 <p className="text-xs sm:text-sm font-black font-mono text-rose-300">
                   Rp {quickSummary.rtKredit.toLocaleString('id-ID')}

@@ -38,7 +38,8 @@ import {
   Plus,
   Camera,
   Receipt,
-  Tag
+  Tag,
+  RefreshCw
 } from 'lucide-react';
 
 export const REASONS_DISKON_PEMBEBASAN = [
@@ -258,6 +259,44 @@ export default function TagihanWarga({
     (currentUser.username || '').toLowerCase().includes('kolektor2') || 
     (currentUser.nama || '').toLowerCase().includes('kolektor2')
   );
+
+  // Helper to extract year from a slot, whether stored in .tahun or embedded in .bulan string
+  const getSlotYear = (slot?: { bulan?: string; tahun?: number | string }, fallbackYear: number = 2026): number => {
+    if (!slot) return fallbackYear;
+    if (slot.tahun !== undefined && slot.tahun !== null && !isNaN(Number(slot.tahun)) && Number(slot.tahun) > 0) {
+      return Number(slot.tahun);
+    }
+    if (slot.bulan) {
+      const yrMatch = slot.bulan.match(/\b(202[0-9]|203[0-9])\b/);
+      if (yrMatch) {
+        return Number(yrMatch[1]);
+      }
+    }
+    return fallbackYear;
+  };
+
+  // Helper to extract canonical lowercase month name from a slot
+  const getSlotMonthName = (slot?: { bulan?: string }): string => {
+    if (!slot || !slot.bulan) return '';
+    const clean = slot.bulan.trim().toLowerCase();
+    const mMatch = clean.match(/(januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember|jan|feb|mar|apr|jun|jul|agt|agu|sep|okt|nov|des)/i);
+    if (mMatch) {
+      return mMatch[1].toLowerCase();
+    }
+    return clean;
+  };
+
+  // Robust matching helpers for Month & Year across string/number/abbreviated/embedded formats
+  const isMatchSlot = (b?: { bulan?: string; tahun?: number | string }, targetBulan?: string, targetTahun?: number | string): boolean => {
+    if (!b || !b.bulan || !targetBulan) return false;
+    const m1 = getSlotMonthName(b);
+    const m2 = targetBulan.trim().toLowerCase();
+    const monthMatches = m1 === m2 || (m1.slice(0, 3) === m2.slice(0, 3) && m1.length >= 3 && m2.length >= 3);
+    if (!monthMatches) return false;
+    const y1 = getSlotYear(b);
+    const y2 = Number(targetTahun) || 2026;
+    return y1 === y2;
+  };
 
   // Sub-tab selection: 'warga' (resident) or 'rombong' (food stalls)
   const [activeSubTab, setActiveSubTab] = useState<'warga' | 'rombong'>('warga');
@@ -650,10 +689,7 @@ export default function TagihanWarga({
     const monthIndex = fullMonths.findIndex(m => m.toLowerCase() === curMonth.toLowerCase());
     
     const unpaidCurrent = fullMonths.slice(0, monthIndex === -1 ? 0 : monthIndex).some(m => {
-      const slot = r.iuranRombong.find(b => 
-        b.bulan.toLowerCase() === m.toLowerCase() && 
-        (b.tahun === curYear || (!b.tahun && curYear === 2026))
-      );
+      const slot = r.iuranRombong.find(b => isMatchSlot(b, m, curYear));
       const isLunas = slot ? slot.lunas : false;
       return !isLunas && isMonthDue(m, curYear);
     });
@@ -663,37 +699,100 @@ export default function TagihanWarga({
 
   const isCitizenTx = (entry: LedgerEntry, citizenName: string, block: string, noRumah: string) => {
     const desc = (entry.deskripsi || '').toLowerCase();
-    const name = citizenName.toLowerCase();
-    const sub = `blok ${block}-${noRumah}`.toLowerCase();
-    const subWithSpace = `blok ${block} - ${noRumah}`.toLowerCase();
-    const subSimple = `${block}-${noRumah}`.toLowerCase();
+    const blok = (block || '').toLowerCase().trim();
+    const num = (noRumah || '').toLowerCase().trim();
     
-    return (
-      desc.includes(name) || 
-      desc.includes(sub) || 
-      desc.includes(subWithSpace) || 
-      desc.includes(subSimple)
-    );
+    if (blok && num) {
+      const standardPair = `${blok}-${num}`;
+      const noLeadingZero = `${blok}-${num.replace(/^0+/, '')}`;
+      const withLeadingZero = `${blok}-${num.length === 1 ? '0' + num : num}`;
+      const spacePair = `${blok} ${num}`;
+      const slashPair = `${blok}/${num}`;
+      
+      if (
+        desc.includes(standardPair) ||
+        desc.includes(noLeadingZero) ||
+        desc.includes(withLeadingZero) ||
+        desc.includes(spacePair) ||
+        desc.includes(slashPair)
+      ) {
+        return true;
+      }
+    }
+    
+    const cleanName = (citizenName || '').toLowerCase()
+      .replace(/^(bapak|bpk|bp\.|ibu|bu\.|pak|mas|mbak|h\.|hj\.)\s+/i, '')
+      .trim();
+    
+    if (cleanName.length >= 3 && desc.includes(cleanName)) {
+      return true;
+    }
+    
+    const parenNameMatch = (citizenName || '').match(/\(([^)]+)\)/);
+    if (parenNameMatch) {
+      const alias = parenNameMatch[1].toLowerCase().replace(/^(bapak|bpk|bp\.|ibu|bu\.|pak|mas|mbak)\s+/i, '').trim();
+      if (alias.length >= 3 && desc.includes(alias)) {
+        return true;
+      }
+    }
+    
+    return false;
+  };
+
+  // Helper to extract all billing/target years from a ledger entry
+  const getLedgerEntryYears = (entry: LedgerEntry): number[] => {
+    const years = new Set<number>();
+    if (entry.tahun && !isNaN(Number(entry.tahun)) && Number(entry.tahun) > 0) {
+      years.add(Number(entry.tahun));
+    }
+    const desc = (entry.deskripsi || '').toLowerCase();
+    const explicitBulan = (entry.bulan || '').toLowerCase();
+    
+    // Find all 4-digit years in description or explicit bulan e.g. 2024, 2025, 2026, 2027
+    const matchesDesc = desc.match(/\b(202[0-9]|203[0-9])\b/g);
+    if (matchesDesc) {
+      matchesDesc.forEach(yStr => years.add(Number(yStr)));
+    }
+    const matchesBulan = explicitBulan.match(/\b(202[0-9]|203[0-9])\b/g);
+    if (matchesBulan) {
+      matchesBulan.forEach(yStr => years.add(Number(yStr)));
+    }
+    
+    // Fallback to entry.tanggal year ONLY if no explicit year was found in description/tahun/bulan
+    if (years.size === 0 && entry.tanggal) {
+      const txYear = new Date(entry.tanggal).getFullYear();
+      if (!isNaN(txYear)) years.add(txYear);
+    }
+    if (years.size === 0) {
+      years.add(2026);
+    }
+    return Array.from(years);
   };
 
   const filterLedgerForWarga = (citizen: WargaBill, targetYear: number) => {
     return ledger.filter(entry => {
       const matchesResident = isCitizenTx(entry, citizen.nama, citizen.blok, citizen.noRumah);
-      const txYear = new Date(entry.tanggal).getFullYear();
-      return matchesResident && txYear === targetYear;
+      if (!matchesResident) return false;
+      const entryYears = getLedgerEntryYears(entry);
+      return entryYears.includes(targetYear);
     });
   };
 
   const filterLedgerForRombong = (rtLapak: RombongBill, targetYear: number) => {
     return ledger.filter(entry => {
       const desc = (entry.deskripsi || '').toLowerCase();
-      const owner = rtLapak.namaPemilik.toLowerCase();
+      const owner = (rtLapak.namaPemilik || '').toLowerCase().trim();
       const cleanOwner = owner.split('(')[0].trim();
-      const lapakNo = rtLapak.noLapak.toLowerCase();
+      const lapakNo = (rtLapak.noLapak || '').toLowerCase().trim();
+      const cleanLokasi = (rtLapak.lokasi || (rtLapak as any).namaUsaha || '').toLowerCase().trim();
       
-      const matchesOwner = desc.includes(owner) || desc.includes(cleanOwner) || desc.includes(lapakNo);
-      const txYear = new Date(entry.tanggal).getFullYear();
-      return matchesOwner && txYear === targetYear;
+      const matchesOwner = (owner.length >= 3 && desc.includes(owner)) || 
+                           (cleanOwner.length >= 3 && desc.includes(cleanOwner)) || 
+                           (lapakNo.length > 0 && desc.includes(lapakNo)) ||
+                           (cleanLokasi.length >= 3 && desc.includes(cleanLokasi));
+      if (!matchesOwner) return false;
+      const entryYears = getLedgerEntryYears(entry);
+      return entryYears.includes(targetYear);
     });
   };
 
@@ -703,10 +802,7 @@ export default function TagihanWarga({
     const priorYears = yearsList.filter(y => y < targetYear);
     priorYears.forEach(yr => {
       defaultMonths.forEach(m => {
-        const slot = w.iuranRT.find(b =>
-          b.bulan.toLowerCase() === m.toLowerCase() &&
-          (b.tahun === yr || (!b.tahun && yr === 2026))
-        );
+        const slot = w.iuranRT.find(b => isMatchSlot(b, m, yr));
         const isLunas = slot ? slot.lunas : false;
         if (!isLunas) {
           total += getDefaultRtRate(yr, m, rateRT);
@@ -722,10 +818,7 @@ export default function TagihanWarga({
     const priorYears = yearsList.filter(y => y < targetYear);
     priorYears.forEach(yr => {
       defaultMonths.forEach(m => {
-        const slot = r.iuranRombong.find(b =>
-          b.bulan.toLowerCase() === m.toLowerCase() &&
-          (b.tahun === yr || (!b.tahun && yr === 2026))
-        );
+        const slot = r.iuranRombong.find(b => isMatchSlot(b, m, yr));
         const isLunas = slot ? slot.lunas : false;
         if (!isLunas) {
           total += getDefaultRombongRate(yr, m, rateRombong);
@@ -751,10 +844,7 @@ export default function TagihanWarga({
     let priorUnpaidTotal = 0;
     priorYears.forEach(yr => {
       defaultMonths.forEach(m => {
-        const slot = w.iuranRT.find(b =>
-          b.bulan.toLowerCase() === m.toLowerCase() &&
-          (b.tahun === yr || (!b.tahun && yr === 2026))
-        );
+        const slot = w.iuranRT.find(b => isMatchSlot(b, m, yr));
         const isLunas = slot ? slot.lunas : false;
         if (!isLunas) {
           const rate = getDefaultRtRate(yr, m, rateRT);
@@ -770,10 +860,7 @@ export default function TagihanWarga({
     let currentPaidTotal = 0;
     
     defaultMonths.forEach(m => {
-      const slot = w.iuranRT.find(b =>
-        b.bulan.toLowerCase() === m.toLowerCase() &&
-        (b.tahun === targetYear || (!b.tahun && targetYear === 2026))
-      );
+      const slot = w.iuranRT.find(b => isMatchSlot(b, m, targetYear));
       const isLunas = slot ? slot.lunas : false;
       const isDue = isMonthDue(m, targetYear);
       const nominal = isLunas 
@@ -1255,10 +1342,7 @@ export default function TagihanWarga({
     let priorUnpaidTotal = 0;
     priorYears.forEach(yr => {
       defaultMonths.forEach(m => {
-        const slot = r.iuranRombong.find(b =>
-          b.bulan.toLowerCase() === m.toLowerCase() &&
-          (b.tahun === yr || (!b.tahun && yr === 2026))
-        );
+        const slot = r.iuranRombong.find(b => isMatchSlot(b, m, yr));
         const isLunas = slot ? slot.lunas : false;
         if (!isLunas) {
           const rate = getDefaultRombongRate(yr, m, rateRombong);
@@ -1274,10 +1358,7 @@ export default function TagihanWarga({
     let currentPaidTotal = 0;
     
     defaultMonths.forEach(m => {
-      const slot = r.iuranRombong.find(b =>
-        b.bulan.toLowerCase() === m.toLowerCase() &&
-        (b.tahun === targetYear || (!b.tahun && targetYear === 2026))
-      );
+      const slot = r.iuranRombong.find(b => isMatchSlot(b, m, targetYear));
       const isLunas = slot ? slot.lunas : false;
       const isDue = isMonthDue(m, targetYear);
       const nominal = isLunas 
@@ -2524,6 +2605,360 @@ export default function TagihanWarga({
     reader.readAsArrayBuffer(file);
   };
 
+  // Comprehensive Reconcile & Synchronize citizen/stall billing status directly from Ledger (Buku Kas)
+  const syncPaymentsFromLedger = () => {
+    if (!ledger || ledger.length === 0) {
+      alert('Tidak ada data transaksi Buku Kas untuk disinkronkan.');
+      return;
+    }
+
+    const monthKeys: { [key: string]: string } = {
+      'januari': 'Januari', 'jan': 'Januari',
+      'februari': 'Februari', 'feb': 'Februari',
+      'maret': 'Maret', 'mar': 'Maret',
+      'april': 'April', 'apr': 'April',
+      'mei': 'Mei', 'may': 'Mei',
+      'juni': 'Juni', 'jun': 'Juni',
+      'juli': 'Juli', 'jul': 'Juli',
+      'agustus': 'Agustus', 'agt': 'Agustus', 'agu': 'Agustus', 'aug': 'Agustus',
+      'september': 'September', 'sep': 'September', 'sept': 'September',
+      'oktober': 'Oktober', 'okt': 'Oktober', 'oct': 'Oktober',
+      'november': 'November', 'nov': 'November',
+      'desember': 'Desember', 'des': 'Desember', 'dec': 'Desember'
+    };
+
+    // Helper to parse all period pairs (bulan, tahun) from a ledger transaction
+    const parsePeriodsFromEntry = (entry: LedgerEntry): { bulan: string; tahun: number }[] => {
+      const desc = (entry.deskripsi || '').toLowerCase();
+      const explicitBulan = (entry.bulan || '').toLowerCase();
+      
+      // Determine default base year from entry
+      let entryBaseYear = 2026;
+      if (entry.tahun && !isNaN(Number(entry.tahun)) && Number(entry.tahun) > 0) {
+        entryBaseYear = Number(entry.tahun);
+      } else {
+        const yrInDesc = desc.match(/\b(202[0-9]|203[0-9])\b/);
+        if (yrInDesc) {
+          entryBaseYear = Number(yrInDesc[1]);
+        } else if (entry.tanggal) {
+          const dtYear = new Date(entry.tanggal).getFullYear();
+          if (!isNaN(dtYear) && dtYear > 0) entryBaseYear = dtYear;
+        }
+      }
+      
+      const results: { bulan: string; tahun: number }[] = [];
+      const addedSet = new Set<string>();
+
+      const addPeriod = (mName: string, yr: number) => {
+        const key = `${mName.toLowerCase()}-${yr}`;
+        if (!addedSet.has(key)) {
+          addedSet.add(key);
+          results.push({ bulan: mName, tahun: yr });
+        }
+      };
+
+      // 1. Check parenthesized collective items: e.g. "(Januari 2026, Februari 2026)", "(Oktober 2025, November 2025)", "(Januari, Februari, Maret 2025)"
+      const parenMatches = desc.match(/\(([^)]+)\)/g);
+      if (parenMatches) {
+        parenMatches.forEach(parenStr => {
+          const insideParen = parenStr.replace(/[\(\)]/g, '');
+          const parenYearMatch = insideParen.match(/\b(202[0-9]|203[0-9])\b/);
+          const parenDefaultYear = parenYearMatch ? Number(parenYearMatch[1]) : entryBaseYear;
+
+          const monthYearRegex = /(januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember|jan|feb|mar|apr|jun|jul|agt|agu|sep|okt|nov|des)\s*(\d{4})?/gi;
+          let m;
+          while ((m = monthYearRegex.exec(insideParen)) !== null) {
+            const canonicalMonth = monthKeys[m[1].toLowerCase()];
+            if (canonicalMonth) {
+              const itemYear = m[2] ? Number(m[2]) : parenDefaultYear;
+              addPeriod(canonicalMonth, itemYear);
+            }
+          }
+        });
+      }
+
+      // 2. Check range patterns: e.g. "Mei 2025 s/d Juli 2025", "Januari - Juni 2026", "Okt 2025 sd Des 2025", "Nov 2025 - Feb 2026"
+      const rangeRegex = /(januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember|jan|feb|mar|apr|jun|jul|agt|agu|sep|okt|nov|des)\s*(\d{4})?\s*(?:s\/d|sd|sampai|-|–|to)\s*(januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember|jan|feb|mar|apr|jun|jul|agt|agu|sep|okt|nov|des)\s*(\d{4})?/gi;
+      let rangeMatch;
+      while ((rangeMatch = rangeRegex.exec(desc)) !== null) {
+        const startM = monthKeys[rangeMatch[1].toLowerCase()];
+        const endM = monthKeys[rangeMatch[3].toLowerCase()];
+        const startYr = rangeMatch[2] ? Number(rangeMatch[2]) : (rangeMatch[4] ? Number(rangeMatch[4]) : entryBaseYear);
+        const endYr = rangeMatch[4] ? Number(rangeMatch[4]) : startYr;
+        
+        if (startM && endM) {
+          const startIdx = fullMonths.indexOf(startM);
+          const endIdx = fullMonths.indexOf(endM);
+          
+          if (startYr === endYr && startIdx !== -1 && endIdx !== -1 && startIdx <= endIdx) {
+            for (let i = startIdx; i <= endIdx; i++) {
+              addPeriod(fullMonths[i], startYr);
+            }
+          } else if (startYr < endYr && startIdx !== -1 && endIdx !== -1) {
+            // Cross-year range (e.g. Nov 2025 to Feb 2026)
+            for (let i = startIdx; i < 12; i++) {
+              addPeriod(fullMonths[i], startYr);
+            }
+            for (let i = 0; i <= endIdx; i++) {
+              addPeriod(fullMonths[i], endYr);
+            }
+          }
+        }
+      }
+
+      // 3. Check individual month-year patterns in description, e.g. "Bulan Oktober 2025", "Bulan Juni 2026", "Iuran 2025 Bln Okt"
+      const singleRegex = /(?:bulan|bln|periode)?\s*(januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember|jan|feb|mar|apr|jun|jul|agt|agu|sep|okt|nov|des)\s*(?:tahun|thn|th)?\s*(\d{4})?/gi;
+      let singleMatch;
+      while ((singleMatch = singleRegex.exec(desc)) !== null) {
+        const canonicalMonth = monthKeys[singleMatch[1].toLowerCase()];
+        if (canonicalMonth) {
+          let matchedYear = singleMatch[2] ? Number(singleMatch[2]) : null;
+          if (!matchedYear) {
+            // Check if there is a year anywhere in the same clause or description
+            const yearInDesc = desc.match(/\b(202[0-9]|203[0-9])\b/);
+            matchedYear = yearInDesc ? Number(yearInDesc[1]) : entryBaseYear;
+          }
+          addPeriod(canonicalMonth, matchedYear);
+        }
+      }
+
+      // 4. Check explicit entry.bulan if provided
+      if (explicitBulan) {
+        const expParts = explicitBulan.split(/[,;\/]+/);
+        expParts.forEach(part => {
+          const p = part.trim();
+          const mMatch = p.match(/(januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember|jan|feb|mar|apr|jun|jul|agt|agu|sep|okt|nov|des)/i);
+          const yMatch = p.match(/\b(202[0-9]|203[0-9])\b/);
+          if (mMatch) {
+            const canonical = monthKeys[mMatch[1].toLowerCase()];
+            if (canonical) {
+              const yr = yMatch ? Number(yMatch[1]) : entryBaseYear;
+              addPeriod(canonical, yr);
+            }
+          }
+        });
+      }
+
+      // Fallback: If no periods were extracted, check if entry has bulan
+      if (results.length === 0 && entry.bulan && monthKeys[entry.bulan.toLowerCase()]) {
+        addPeriod(monthKeys[entry.bulan.toLowerCase()], entryBaseYear);
+      }
+
+      return results;
+    };
+
+    const isWargaMatchingEntry = (w: WargaBill, desc: string): boolean => {
+      const cleanDesc = desc.toLowerCase();
+      const blok = (w.blok || '').toLowerCase().trim();
+      const noRumah = (w.noRumah || '').toLowerCase().trim();
+      
+      if (blok && noRumah) {
+        const standardPair = `${blok}-${noRumah}`;
+        const noLeadingZero = `${blok}-${noRumah.replace(/^0+/, '')}`;
+        const withLeadingZero = `${blok}-${noRumah.length === 1 ? '0' + noRumah : noRumah}`;
+        const spacePair = `${blok} ${noRumah}`;
+        const slashPair = `${blok}/${noRumah}`;
+        
+        if (
+          cleanDesc.includes(standardPair) ||
+          cleanDesc.includes(noLeadingZero) ||
+          cleanDesc.includes(withLeadingZero) ||
+          cleanDesc.includes(spacePair) ||
+          cleanDesc.includes(slashPair)
+        ) {
+          return true;
+        }
+      }
+
+      const cleanName = (w.nama || '').toLowerCase().trim();
+      if (cleanName.length >= 3) {
+        if (cleanDesc.includes(cleanName)) return true;
+        
+        const parts = cleanName.split(/[\(\)\/\-]+/).map(p => p.trim()).filter(p => p.length >= 3);
+        for (const part of parts) {
+          const pureName = part.replace(/\b(bpk|bp|ibu|bu|pak|ustad|haji|h\.)\b/g, '').trim();
+          if (pureName.length >= 3 && cleanDesc.includes(pureName)) {
+            return true;
+          }
+        }
+      }
+
+      return false;
+    };
+
+    const isRombongMatchingEntry = (r: RombongBill, desc: string): boolean => {
+      const cleanDesc = desc.toLowerCase();
+      const noLapak = (r.noLapak || '').toLowerCase().trim();
+      if (noLapak.length >= 1) {
+        if (cleanDesc.includes(noLapak) || cleanDesc.includes(`lapak ${noLapak}`) || cleanDesc.includes(`rombong ${noLapak}`)) {
+          return true;
+        }
+      }
+
+      const cleanPemilik = (r.namaPemilik || '').toLowerCase().trim();
+      if (cleanPemilik.length >= 3 && cleanDesc.includes(cleanPemilik)) {
+        return true;
+      }
+
+      const cleanLokasi = (r.lokasi || (r as any).namaUsaha || '').toLowerCase().trim();
+      if (cleanLokasi.length >= 3 && cleanDesc.includes(cleanLokasi)) {
+        return true;
+      }
+
+      return false;
+    };
+
+    let matchedWargaCount = 0;
+    let matchedRombongCount = 0;
+
+    // 1. Process Warga List Reconciliation
+    const workingWargaList = wargaList.map(w => {
+      const iuranRT = Array.isArray(w.iuranRT) ? [...w.iuranRT] : [];
+      let wargaModified = false;
+
+      ledger.forEach(entry => {
+        if (entry.tipe !== 'pemasukan') return;
+        const desc = (entry.deskripsi || '').toLowerCase();
+        
+        if (!isWargaMatchingEntry(w, desc)) return;
+
+        const periods = parsePeriodsFromEntry(entry);
+        if (periods.length === 0) return;
+
+        const perMonthNominal = entry.jumlah && periods.length > 0 ? Math.round(entry.jumlah / periods.length) : 35000;
+        const paymentDate = entry.tanggal || new Date().toISOString().split('T')[0];
+        const paymentTime = (entry as any).jam || '12:00';
+
+        periods.forEach(p => {
+          const slotIdx = iuranRT.findIndex(b => isMatchSlot(b, p.bulan, p.tahun));
+          if (slotIdx > -1) {
+            const currentSlot = iuranRT[slotIdx];
+            if (!currentSlot.lunas) {
+              iuranRT[slotIdx] = {
+                ...currentSlot,
+                lunas: true,
+                nominal: perMonthNominal || currentSlot.nominal || getDefaultRtRate(p.tahun, p.bulan, rateRT),
+                tahun: p.tahun,
+                tanggalBayar: currentSlot.tanggalBayar || paymentDate,
+                jamBayar: currentSlot.jamBayar || paymentTime,
+                catatan: currentSlot.catatan || (periods.length > 1 ? 'Kolektif Buku Kas' : undefined),
+                manualKoreksi: true
+              };
+              wargaModified = true;
+              matchedWargaCount++;
+            }
+          } else {
+            iuranRT.push({
+              bulan: p.bulan,
+              lunas: true,
+              nominal: perMonthNominal || getDefaultRtRate(p.tahun, p.bulan, rateRT),
+              tahun: p.tahun,
+              tanggalBayar: paymentDate,
+              jamBayar: paymentTime,
+              catatan: periods.length > 1 ? 'Kolektif Buku Kas' : undefined,
+              manualKoreksi: true
+            });
+            wargaModified = true;
+            matchedWargaCount++;
+          }
+        });
+      });
+
+      if (wargaModified) {
+        return {
+          ...w,
+          iuranRT
+        };
+      }
+      return w;
+    });
+
+    // 2. Process Rombong / Lapak List Reconciliation
+    const workingRombongList = (rombongList || []).map(r => {
+      const iuranRombong = Array.isArray(r.iuranRombong) ? [...r.iuranRombong] : [];
+      let rombongModified = false;
+
+      ledger.forEach(entry => {
+        if (entry.tipe !== 'pemasukan') return;
+        const desc = (entry.deskripsi || '').toLowerCase();
+        
+        if (!isRombongMatchingEntry(r, desc)) return;
+
+        const periods = parsePeriodsFromEntry(entry);
+        if (periods.length === 0) return;
+
+        const perMonthNominal = entry.jumlah && periods.length > 0 ? Math.round(entry.jumlah / periods.length) : 50000;
+        const paymentDate = entry.tanggal || new Date().toISOString().split('T')[0];
+        const paymentTime = (entry as any).jam || '12:00';
+
+        periods.forEach(p => {
+          const slotIdx = iuranRombong.findIndex(b => isMatchSlot(b, p.bulan, p.tahun));
+          if (slotIdx > -1) {
+            const currentSlot = iuranRombong[slotIdx];
+            if (!currentSlot.lunas) {
+              iuranRombong[slotIdx] = {
+                ...currentSlot,
+                lunas: true,
+                nominal: perMonthNominal || currentSlot.nominal || getDefaultRombongRate(p.tahun, p.bulan, rateRombong),
+                tahun: p.tahun,
+                tanggalBayar: currentSlot.tanggalBayar || paymentDate,
+                jamBayar: currentSlot.jamBayar || paymentTime,
+                catatan: currentSlot.catatan || (periods.length > 1 ? 'Kolektif Buku Kas' : undefined),
+                manualKoreksi: true
+              };
+              rombongModified = true;
+              matchedRombongCount++;
+            }
+          } else {
+            iuranRombong.push({
+              bulan: p.bulan,
+              lunas: true,
+              nominal: perMonthNominal || getDefaultRombongRate(p.tahun, p.bulan, rateRombong),
+              tahun: p.tahun,
+              tanggalBayar: paymentDate,
+              jamBayar: paymentTime,
+              catatan: periods.length > 1 ? 'Kolektif Buku Kas' : undefined,
+              manualKoreksi: true
+            });
+            rombongModified = true;
+            matchedRombongCount++;
+          }
+        });
+      });
+
+      if (rombongModified) {
+        return {
+          ...r,
+          iuranRombong
+        };
+      }
+      return r;
+    });
+
+    if (matchedWargaCount > 0) {
+      updateWargaList(workingWargaList);
+      if (selectedWargaHistory) {
+        const refreshedW = workingWargaList.find(w => w.id === selectedWargaHistory.id);
+        if (refreshedW) setSelectedWargaHistory(refreshedW);
+      }
+    }
+
+    if (matchedRombongCount > 0 && updateRombongList) {
+      updateRombongList(workingRombongList);
+      if (selectedRombongHistory) {
+        const refreshedR = workingRombongList.find(r => r.id === selectedRombongHistory.id);
+        if (refreshedR) setSelectedRombongHistory(refreshedR);
+      }
+    }
+
+    const totalSynced = matchedWargaCount + matchedRombongCount;
+    if (totalSynced > 0) {
+      alert(`Sinkronisasi Selesai: Berhasil menyinkronkan & melunaskan ${matchedWargaCount} tagihan iuran RT warga dan ${matchedRombongCount} tagihan sewa rombong dari transaksi Buku Kas (termasuk tagihan kolektif & multi-bulan)!`);
+    } else {
+      alert('Semua data tagihan warga dan rombong telah sinkron dan sesuai dengan Buku Kas.');
+    }
+  };
+
   const exportAllWargaList = (list: WargaBill[]) => {
     const printDoc = {
       write: (htmlContent: string) => {
@@ -3715,11 +4150,11 @@ export default function TagihanWarga({
 
     const updatedWargaList = wargaList.map(w => {
       if (w.id === warga.id) {
-        const index = w[billingType].findIndex(b => b.bulan.toLowerCase() === bulan.toLowerCase() && (b.tahun === tahun || (!b.tahun && tahun === 2026)));
+        const index = w[billingType].findIndex(b => isMatchSlot(b, bulan, tahun));
         let updatedBillings = [...w[billingType]];
         if (index > -1) {
           updatedBillings = updatedBillings.map(b => {
-             if (b.bulan.toLowerCase() === bulan.toLowerCase() && (b.tahun === tahun || (!b.tahun && tahun === 2026))) {
+            if (isMatchSlot(b, bulan, tahun)) {
               return { 
                 ...b, 
                 lunas: true, 
@@ -3894,7 +4329,7 @@ export default function TagihanWarga({
         let updatedBillings = [...w[billingType]];
         
         items.forEach(item => {
-          const index = updatedBillings.findIndex(b => b.bulan.toLowerCase() === item.bulan.toLowerCase() && (b.tahun === item.tahun || (!b.tahun && item.tahun === 2026)));
+          const index = updatedBillings.findIndex(b => isMatchSlot(b, item.bulan, item.tahun));
           const itemNetNominal = isPembebasan ? 0 : Math.max(0, item.nominal - diskonPerMonth);
           const itemDiskon = isPembebasan ? item.nominal : (diskonPerMonth > 0 ? diskonPerMonth : undefined);
 
@@ -4033,11 +4468,11 @@ export default function TagihanWarga({
 
     const updatedRombongList = rombongList.map(r => {
       if (r.id === rombong.id) {
-        const index = r[billingType].findIndex(b => b.bulan.toLowerCase() === bulan.toLowerCase() && (b.tahun === tahun || (!b.tahun && tahun === 2026)));
+        const index = r[billingType].findIndex(b => isMatchSlot(b, bulan, tahun));
         let updatedBillings = [...r[billingType]];
         if (index > -1) {
           updatedBillings = updatedBillings.map(b => {
-            if (b.bulan.toLowerCase() === bulan.toLowerCase() && (b.tahun === tahun || (!b.tahun && tahun === 2026))) {
+            if (isMatchSlot(b, bulan, tahun)) {
               return { 
                 ...b, 
                 lunas: true, 
@@ -4146,10 +4581,7 @@ export default function TagihanWarga({
       return;
     }
 
-    const slot = warga.iuranRT.find(b => 
-      b.bulan.toLowerCase() === bulan.toLowerCase() && 
-      (b.tahun === tahun || (!b.tahun && tahun === 2026))
-    );
+    const slot = warga.iuranRT.find(b => isMatchSlot(b, bulan, tahun));
     const existingDate = slot?.tanggalBayar || new Date().toISOString().split('T')[0];
     const existingTime = slot?.jamBayar || (() => {
       const now = new Date();
@@ -4181,10 +4613,7 @@ export default function TagihanWarga({
       return;
     }
 
-    const slot = rombong.iuranRombong.find(b => 
-      b.bulan.toLowerCase() === bulan.toLowerCase() && 
-      (b.tahun === tahun || (!b.tahun && tahun === 2026))
-    );
+    const slot = rombong.iuranRombong.find(b => isMatchSlot(b, bulan, tahun));
     const existingDate = slot?.tanggalBayar || new Date().toISOString().split('T')[0];
     const existingTime = slot?.jamBayar || (() => {
       const now = new Date();
@@ -4221,8 +4650,7 @@ export default function TagihanWarga({
         // Revert source citizen billing slot
         if (w.id === warga.id) {
           const updatedBillings = w[billingType].map(b => {
-            const isMatch = b.bulan.toLowerCase() === bulan.toLowerCase() && 
-                            (b.tahun === initialTahun || (!b.tahun && initialTahun === 2026));
+            const isMatch = isMatchSlot(b, bulan, initialTahun);
             if (isMatch) {
               return { ...b, lunas: false, tanggalBayar: undefined, jamBayar: undefined, catatan: undefined, manualKoreksi: true };
             }
@@ -4237,15 +4665,12 @@ export default function TagihanWarga({
 
         // Apply to target citizen billing slot
         if (w.id === corrTransferTargetWargaId) {
-          const index = w[billingType].findIndex(b => 
-            b.bulan.toLowerCase() === bulan.toLowerCase() && 
-            (b.tahun === corrTahun || (!b.tahun && corrTahun === 2026))
-          );
+          const index = w[billingType].findIndex(b => isMatchSlot(b, bulan, corrTahun));
           let updatedBillings = [...w[billingType]];
           if (index > -1) {
             updatedBillings = updatedBillings.map(b => {
-              if (b.bulan.toLowerCase() === bulan.toLowerCase() && (b.tahun === corrTahun || (!b.tahun && corrTahun === 2026))) {
-                return { ...b, lunas: true, nominal: corrNominal, tanggalBayar: corrPaymentDate, jamBayar: corrPaymentTime, catatan: corrCatatan, manualKoreksi: true };
+              if (isMatchSlot(b, bulan, corrTahun)) {
+                return { ...b, lunas: true, nominal: corrNominal, tahun: corrTahun, tanggalBayar: corrPaymentDate, jamBayar: corrPaymentTime, catatan: corrCatatan, manualKoreksi: true };
               }
               return b;
             });
@@ -4291,10 +4716,7 @@ export default function TagihanWarga({
     }
 
     // 2. Adjusting status, year/period, or nominal for the same citizen
-    const slot = warga.iuranRT.find(b => 
-      b.bulan.toLowerCase() === bulan.toLowerCase() && 
-      (b.tahun === initialTahun || (!b.tahun && initialTahun === 2026))
-    );
+    const slot = warga.iuranRT.find(b => isMatchSlot(b, bulan, initialTahun));
     const originallyNoCashFlow = slot?.noCashFlow || false;
     const isNoCashFlowNow = corrNoCashFlow || originallyNoCashFlow;
 
@@ -4318,17 +4740,13 @@ export default function TagihanWarga({
 
     const updatedWargaList = wargaList.map(w => {
       if (w.id === warga.id) {
-        const index = w[billingType].findIndex(b => 
-          b.bulan.toLowerCase() === bulan.toLowerCase() && 
-          (b.tahun === initialTahun || (!b.tahun && initialTahun === 2026))
-        );
+        const index = w[billingType].findIndex(b => isMatchSlot(b, bulan, initialTahun));
         let updatedBillings = [...w[billingType]];
         
         if (corrStatusLunas) {
           if (index > -1) {
             updatedBillings = updatedBillings.map(b => {
-              const isMatch = b.bulan.toLowerCase() === bulan.toLowerCase() && 
-                              (b.tahun === initialTahun || (!b.tahun && initialTahun === 2026));
+              const isMatch = isMatchSlot(b, bulan, initialTahun);
               if (isMatch) {
                 return { 
                   ...b, 
@@ -4367,8 +4785,7 @@ export default function TagihanWarga({
           // Unmark / change to unpaid
           if (index > -1) {
             updatedBillings = updatedBillings.map(b => {
-              const isMatch = b.bulan.toLowerCase() === bulan.toLowerCase() && 
-                              (b.tahun === initialTahun || (!b.tahun && initialTahun === 2026));
+              const isMatch = isMatchSlot(b, bulan, initialTahun);
               if (isMatch) {
                 return { ...b, lunas: false, tanggalBayar: undefined, jamBayar: undefined, noCashFlow: corrNoCashFlow, catatan: corrCatatan, manualKoreksi: true };
               }
@@ -4590,15 +5007,12 @@ export default function TagihanWarga({
 
         // Apply to target stall
         if (r.id === corrTransferTargetRombongId) {
-          const index = r[billingType].findIndex(b => 
-            b.bulan.toLowerCase() === bulan.toLowerCase() && 
-            (b.tahun === corrRombongTahun || (!b.tahun && corrRombongTahun === 2026))
-          );
+          const index = r[billingType].findIndex(b => isMatchSlot(b, bulan, corrRombongTahun));
           let updatedBillings = [...r[billingType]];
           if (index > -1) {
             updatedBillings = updatedBillings.map(b => {
-              if (b.bulan.toLowerCase() === bulan.toLowerCase() && (b.tahun === corrRombongTahun || (!b.tahun && corrRombongTahun === 2026))) {
-                return { ...b, lunas: true, nominal: corrRombongNominal, tanggalBayar: corrPaymentDate, jamBayar: corrPaymentTime, catatan: corrRombongCatatan };
+              if (isMatchSlot(b, bulan, corrRombongTahun)) {
+                return { ...b, lunas: true, nominal: corrRombongNominal, tahun: corrRombongTahun, tanggalBayar: corrPaymentDate, jamBayar: corrPaymentTime, catatan: corrRombongCatatan, manualKoreksi: true };
               }
               return b;
             });
@@ -4610,7 +5024,8 @@ export default function TagihanWarga({
               tahun: corrRombongTahun,
               tanggalBayar: corrPaymentDate,
               jamBayar: corrPaymentTime,
-              catatan: corrRombongCatatan
+              catatan: corrRombongCatatan,
+              manualKoreksi: true
             });
           }
           return { ...r, [billingType]: updatedBillings };
@@ -4643,26 +5058,19 @@ export default function TagihanWarga({
     }
 
     // 2. Adjusting status, periods, or nominals for the same merchant
-    const slot = rombong.iuranRombong.find(b => 
-      b.bulan.toLowerCase() === bulan.toLowerCase() && 
-      (b.tahun === initialTahun || (!b.tahun && initialTahun === 2026))
-    );
+    const slot = rombong.iuranRombong.find(b => isMatchSlot(b, bulan, initialTahun));
     const originallyNoCashFlow = slot?.noCashFlow || false;
     const isNoCashFlowNow = corrRombongNoCashFlow || originallyNoCashFlow;
 
     const updatedRombongList = rombongList.map(r => {
       if (r.id === rombong.id) {
-        const index = r[billingType].findIndex(b => 
-          b.bulan.toLowerCase() === bulan.toLowerCase() && 
-          (b.tahun === initialTahun || (!b.tahun && initialTahun === 2026))
-        );
+        const index = r[billingType].findIndex(b => isMatchSlot(b, bulan, initialTahun));
         let updatedBillings = [...r[billingType]];
 
         if (corrRombongStatusLunas) {
           if (index > -1) {
             updatedBillings = updatedBillings.map(b => {
-              const isMatch = b.bulan.toLowerCase() === bulan.toLowerCase() && 
-                              (b.tahun === initialTahun || (!b.tahun && initialTahun === 2026));
+              const isMatch = isMatchSlot(b, bulan, initialTahun);
               if (isMatch) {
                 return { ...b, lunas: true, nominal: corrRombongNominal, tahun: corrRombongTahun, tanggalBayar: corrPaymentDate, jamBayar: corrPaymentTime, noCashFlow: corrRombongNoCashFlow, catatan: corrRombongCatatan, manualKoreksi: true };
               }
@@ -4684,8 +5092,7 @@ export default function TagihanWarga({
         } else {
           if (index > -1) {
             updatedBillings = updatedBillings.map(b => {
-              const isMatch = b.bulan.toLowerCase() === bulan.toLowerCase() && 
-                              (b.tahun === initialTahun || (!b.tahun && initialTahun === 2026));
+              const isMatch = isMatchSlot(b, bulan, initialTahun);
               if (isMatch) {
                 return { ...b, lunas: false, tanggalBayar: undefined, jamBayar: undefined, noCashFlow: corrRombongNoCashFlow, catatan: corrRombongCatatan, manualKoreksi: true };
               }
@@ -4846,10 +5253,7 @@ export default function TagihanWarga({
     const defaultMonths = fullMonths;
     const iuranRT = Array.isArray(w.iuranRT) ? w.iuranRT : [];
     const hasOutstanding = defaultMonths.some(m => {
-      const slot = iuranRT.find(b => 
-        b && b.bulan && b.bulan.toLowerCase() === m.toLowerCase() && 
-        (b.tahun === selectedBillingYear || (!b.tahun && selectedBillingYear === 2026))
-      );
+      const slot = iuranRT.find(b => isMatchSlot(b, m, selectedBillingYear));
       return !slot || !slot.lunas;
     });
 
@@ -4896,10 +5300,7 @@ export default function TagihanWarga({
     const defaultMonths = fullMonths;
     const iuranRombong = Array.isArray(r.iuranRombong) ? r.iuranRombong : [];
     const hasOutstanding = defaultMonths.some(m => {
-      const slot = iuranRombong.find(b => 
-        b && b.bulan && b.bulan.toLowerCase() === m.toLowerCase() && 
-        (b.tahun === selectedBillingYear || (!b.tahun && selectedBillingYear === 2026))
-      );
+      const slot = iuranRombong.find(b => isMatchSlot(b, m, selectedBillingYear));
       return !slot || !slot.lunas;
     });
 
@@ -4930,7 +5331,7 @@ export default function TagihanWarga({
     const iuranRT = Array.isArray(w.iuranRT) ? w.iuranRT : [];
     if (w.isDeleted) {
       const hasAnyPaidInYear = iuranRT.some(b => 
-        b && b.lunas && (b.tahun === selectedBillingYear || (!b.tahun && selectedBillingYear === 2026))
+        b && b.lunas && getSlotYear(b, selectedBillingYear) === Number(selectedBillingYear)
       );
       if (!hasAnyPaidInYear) return false;
     }
@@ -4945,10 +5346,7 @@ export default function TagihanWarga({
 
     const defaultMonths = fullMonths;
     const hasOutstanding = defaultMonths.some(m => {
-      const slot = iuranRT.find(b => 
-        b && b.bulan && b.bulan.toLowerCase() === m.toLowerCase() && 
-        (b.tahun === selectedBillingYear || (!b.tahun && selectedBillingYear === 2026))
-      );
+      const slot = iuranRT.find(b => isMatchSlot(b, m, selectedBillingYear));
       return !slot || !slot.lunas;
     });
 
@@ -4969,7 +5367,7 @@ export default function TagihanWarga({
     const iuranRombong = Array.isArray(r.iuranRombong) ? r.iuranRombong : [];
     if (r.isDeleted) {
       const hasAnyPaidInYear = iuranRombong.some(b => 
-        b && b.lunas && (b.tahun === selectedBillingYear || (!b.tahun && selectedBillingYear === 2026))
+        b && b.lunas && getSlotYear(b, selectedBillingYear) === Number(selectedBillingYear)
       );
       if (!hasAnyPaidInYear) return false;
     }
@@ -4984,10 +5382,7 @@ export default function TagihanWarga({
 
     const defaultMonths = fullMonths;
     const hasOutstanding = defaultMonths.some(m => {
-      const slot = iuranRombong.find(b => 
-        b && b.bulan && b.bulan.toLowerCase() === m.toLowerCase() && 
-        (b.tahun === selectedBillingYear || (!b.tahun && selectedBillingYear === 2026))
-      );
+      const slot = iuranRombong.find(b => isMatchSlot(b, m, selectedBillingYear));
       return !slot || !slot.lunas;
     });
 
@@ -5010,10 +5405,7 @@ export default function TagihanWarga({
     const iuranRT = Array.isArray(w.iuranRT) ? w.iuranRT : [];
     
     defaultMonths.forEach(m => {
-      const slot = iuranRT.find(b => 
-        b && b.bulan && b.bulan.toLowerCase() === m.toLowerCase() && 
-        (b.tahun === selectedBillingYear || (!b.tahun && selectedBillingYear === 2026))
-      );
+      const slot = iuranRT.find(b => isMatchSlot(b, m, selectedBillingYear));
       if ((!slot || !slot.lunas) && isMonthDue(m, selectedBillingYear)) {
         count++;
       }
@@ -5022,10 +5414,7 @@ export default function TagihanWarga({
     const priorYears = yearsList.filter(y => y < selectedBillingYear);
     priorYears.forEach(yr => {
       defaultMonths.forEach(m => {
-        const slot = iuranRT.find(b => 
-          b && b.bulan && b.bulan.toLowerCase() === m.toLowerCase() && 
-          (b.tahun === yr || (!b.tahun && yr === 2026))
-        );
+        const slot = iuranRT.find(b => isMatchSlot(b, m, yr));
         if (!slot || !slot.lunas) {
           count++;
         }
@@ -5041,10 +5430,7 @@ export default function TagihanWarga({
     const iuranRombong = Array.isArray(r.iuranRombong) ? r.iuranRombong : [];
     
     defaultMonths.forEach(m => {
-      const slot = iuranRombong.find(b => 
-        b && b.bulan && b.bulan.toLowerCase() === m.toLowerCase() && 
-        (b.tahun === selectedBillingYear || (!b.tahun && selectedBillingYear === 2026))
-      );
+      const slot = iuranRombong.find(b => isMatchSlot(b, m, selectedBillingYear));
       if ((!slot || !slot.lunas) && isMonthDue(m, selectedBillingYear)) {
         count++;
       }
@@ -5053,10 +5439,7 @@ export default function TagihanWarga({
     const priorYears = yearsList.filter(y => y < selectedBillingYear);
     priorYears.forEach(yr => {
       defaultMonths.forEach(m => {
-        const slot = iuranRombong.find(b => 
-          b && b.bulan && b.bulan.toLowerCase() === m.toLowerCase() && 
-          (b.tahun === yr || (!b.tahun && yr === 2026))
-        );
+        const slot = iuranRombong.find(b => isMatchSlot(b, m, yr));
         if (!slot || !slot.lunas) {
           count++;
         }
@@ -5103,44 +5486,28 @@ export default function TagihanWarga({
   // Print Warga Annual Billing Book PDF
   const handlePrintWargaAnnualBook = (warga: WargaBill, targetYear: number) => {
     const totalPaidMonths = fullMonths.filter(m => {
-      const shortM = m.slice(0, 3);
-      const slot = warga.iuranRT.find(b => 
-        (b.tahun === targetYear || (!b.tahun && targetYear === 2026)) &&
-        (b.bulan.toLowerCase() === m.toLowerCase() || b.bulan.toLowerCase() === shortM.toLowerCase())
-      );
+      const slot = warga.iuranRT.find(b => isMatchSlot(b, m, targetYear));
       return slot && slot.lunas;
     }).length;
 
     const totalUnpaidMonths = fullMonths.filter(m => {
-      const shortM = m.slice(0, 3);
-      const slot = warga.iuranRT.find(b => 
-        (b.tahun === targetYear || (!b.tahun && targetYear === 2026)) &&
-        (b.bulan.toLowerCase() === m.toLowerCase() || b.bulan.toLowerCase() === shortM.toLowerCase())
-      );
+      const slot = warga.iuranRT.find(b => isMatchSlot(b, m, targetYear));
       const isLunas = slot ? slot.lunas : false;
       return !isLunas && isMonthDue(m, targetYear);
     }).length;
 
     const totalPaidAmount = warga.iuranRT
-      .filter(b => b.lunas && (b.tahun === targetYear || (!b.tahun && targetYear === 2026)))
+      .filter(b => b.lunas && getSlotYear(b, targetYear) === Number(targetYear))
       .reduce((sum, b) => sum + b.nominal, 0);
 
     const totalUnpaidAmount = fullMonths.filter(m => {
-      const shortM = m.slice(0, 3);
-      const slot = warga.iuranRT.find(b => 
-        (b.tahun === targetYear || (!b.tahun && targetYear === 2026)) &&
-        (b.bulan.toLowerCase() === m.toLowerCase() || b.bulan.toLowerCase() === shortM.toLowerCase())
-      );
+      const slot = warga.iuranRT.find(b => isMatchSlot(b, m, targetYear));
       const isLunas = slot ? slot.lunas : false;
       return !isLunas && isMonthDue(m, targetYear);
     }).reduce((sum, m) => sum + getDefaultRtRate(targetYear, m, rateRT), 0);
 
     const tableRowsHtml = fullMonths.map((m, idx) => {
-      const shortM = m.slice(0, 3);
-      const slot = warga.iuranRT.find(b => 
-        (b.tahun === targetYear || (!b.tahun && targetYear === 2026)) &&
-        (b.bulan.toLowerCase() === m.toLowerCase() || b.bulan.toLowerCase() === shortM.toLowerCase())
-      );
+      const slot = warga.iuranRT.find(b => isMatchSlot(b, m, targetYear));
 
       const isLunas = slot ? slot.lunas : false;
       const isFuture = !isMonthDue(m, targetYear);
@@ -5516,44 +5883,28 @@ export default function TagihanWarga({
   // Print Rombong Annual Billing Book PDF
   const handlePrintRombongAnnualBook = (rombong: RombongBill, targetYear: number) => {
     const totalPaidMonths = fullMonths.filter(m => {
-      const shortM = m.slice(0, 3);
-      const slot = rombong.iuranRombong.find(b => 
-        (b.tahun === targetYear || (!b.tahun && targetYear === 2026)) &&
-        (b.bulan.toLowerCase() === m.toLowerCase() || b.bulan.toLowerCase() === shortM.toLowerCase())
-      );
+      const slot = rombong.iuranRombong.find(b => isMatchSlot(b, m, targetYear));
       return slot && slot.lunas;
     }).length;
 
     const totalUnpaidMonths = fullMonths.filter(m => {
-      const shortM = m.slice(0, 3);
-      const slot = rombong.iuranRombong.find(b => 
-        (b.tahun === targetYear || (!b.tahun && targetYear === 2026)) &&
-        (b.bulan.toLowerCase() === m.toLowerCase() || b.bulan.toLowerCase() === shortM.toLowerCase())
-      );
+      const slot = rombong.iuranRombong.find(b => isMatchSlot(b, m, targetYear));
       const isLunas = slot ? slot.lunas : false;
       return !isLunas && isMonthDue(m, targetYear);
     }).length;
 
     const totalPaidAmount = rombong.iuranRombong
-      .filter(b => b.lunas && (b.tahun === targetYear || (!b.tahun && targetYear === 2026)))
+      .filter(b => b.lunas && getSlotYear(b, targetYear) === Number(targetYear))
       .reduce((sum, b) => sum + b.nominal, 0);
 
     const totalUnpaidAmount = fullMonths.filter(m => {
-      const shortM = m.slice(0, 3);
-      const slot = rombong.iuranRombong.find(b => 
-        (b.tahun === targetYear || (!b.tahun && targetYear === 2026)) &&
-        (b.bulan.toLowerCase() === m.toLowerCase() || b.bulan.toLowerCase() === shortM.toLowerCase())
-      );
+      const slot = rombong.iuranRombong.find(b => isMatchSlot(b, m, targetYear));
       const isLunas = slot ? slot.lunas : false;
       return !isLunas && isMonthDue(m, targetYear);
     }).reduce((sum, m) => sum + getDefaultRombongRate(targetYear, m, rateRombong), 0);
 
     const tableRowsHtml = fullMonths.map((m, idx) => {
-      const shortM = m.slice(0, 3);
-      const slot = rombong.iuranRombong.find(b => 
-        (b.tahun === targetYear || (!b.tahun && targetYear === 2026)) &&
-        (b.bulan.toLowerCase() === m.toLowerCase() || b.bulan.toLowerCase() === shortM.toLowerCase())
-      );
+      const slot = rombong.iuranRombong.find(b => isMatchSlot(b, m, targetYear));
 
       const isLunas = slot ? slot.lunas : false;
       const isFuture = !isMonthDue(m, targetYear);
@@ -5935,11 +6286,7 @@ export default function TagihanWarga({
     message += `*Rincian Status Pembayaran Iuran RT (Jan - Des):*\n`;
     
     fullMonths.forEach((m, idx) => {
-      const shortM = m.slice(0, 3);
-      const slot = warga.iuranRT.find(b => 
-        (b.tahun === targetYear || (!b.tahun && targetYear === 2026)) &&
-        (b.bulan.toLowerCase() === m.toLowerCase() || b.bulan.toLowerCase() === shortM.toLowerCase())
-      );
+      const slot = warga.iuranRT.find(b => isMatchSlot(b, m, targetYear));
       
       if (slot && slot.lunas) {
         const timeStr = slot.tanggalBayar ? ` (Tgl: ${slot.tanggalBayar}${slot.jamBayar ? ` ${slot.jamBayar}` : ''})` : '';
@@ -5955,7 +6302,7 @@ export default function TagihanWarga({
     });
     
     const totalPaid = warga.iuranRT
-      .filter(b => b.lunas && (b.tahun === targetYear || (!b.tahun && targetYear === 2026)))
+      .filter(b => b.lunas && getSlotYear(b, targetYear) === Number(targetYear))
       .reduce((sum, b) => sum + b.nominal, 0);
     message += `\n*Total Terbayar: Rp ${totalPaid.toLocaleString('id-ID')}*\n\n`;
     message += `Dicetak otomatis real-time dari Sistem Pembukuan Digital RT 08 Perumtas 3. ✨\n`;
@@ -5972,11 +6319,7 @@ export default function TagihanWarga({
     message += `*Rincian Status Pembayaran Sewa (Jan - Des):*\n`;
     
     fullMonths.forEach((m, idx) => {
-      const shortM = m.slice(0, 3);
-      const slot = rombong.iuranRombong.find(b => 
-        (b.tahun === targetYear || (!b.tahun && targetYear === 2026)) &&
-        (b.bulan.toLowerCase() === m.toLowerCase() || b.bulan.toLowerCase() === shortM.toLowerCase())
-      );
+      const slot = rombong.iuranRombong.find(b => isMatchSlot(b, m, targetYear));
       
       if (slot && slot.lunas) {
         const timeStr = slot.tanggalBayar ? ` (Tgl: ${slot.tanggalBayar}${slot.jamBayar ? ` ${slot.jamBayar}` : ''})` : '';
@@ -5992,7 +6335,7 @@ export default function TagihanWarga({
     });
     
     const totalPaid = rombong.iuranRombong
-      .filter(b => b.lunas && (b.tahun === targetYear || (!b.tahun && targetYear === 2026)))
+      .filter(b => b.lunas && getSlotYear(b, targetYear) === Number(targetYear))
       .reduce((sum, b) => sum + b.nominal, 0);
     message += `\n*Total Terbayar: Rp ${totalPaid.toLocaleString('id-ID')}*\n\n`;
     message += `Dicetak otomatis real-time dari Sistem Pembukuan Digital RT 08 Perumtas 3. ✨\n`;
@@ -6005,10 +6348,7 @@ export default function TagihanWarga({
     const defaultMonths = fullMonths;
     const unpaidRT: string[] = [];
     defaultMonths.forEach(m => {
-      const slot = warga.iuranRT.find(b => 
-        b.bulan.toLowerCase() === m.toLowerCase() && 
-        (b.tahun === selectedBillingYear || (!b.tahun && selectedBillingYear === 2026))
-      );
+      const slot = warga.iuranRT.find(b => isMatchSlot(b, m, selectedBillingYear));
       if ((!slot || !slot.lunas) && isMonthDue(m, selectedBillingYear)) {
         unpaidRT.push(m);
       }
@@ -6098,10 +6438,7 @@ export default function TagihanWarga({
     const defaultMonths = fullMonths;
     const unpaidRombong: string[] = [];
     defaultMonths.forEach(m => {
-      const slot = rombong.iuranRombong.find(b => 
-        b.bulan.toLowerCase() === m.toLowerCase() && 
-        (b.tahun === selectedBillingYear || (!b.tahun && selectedBillingYear === 2026))
-      );
+      const slot = rombong.iuranRombong.find(b => isMatchSlot(b, m, selectedBillingYear));
       if ((!slot || !slot.lunas) && isMonthDue(m, selectedBillingYear)) {
         unpaidRombong.push(m);
       }
@@ -6418,6 +6755,18 @@ export default function TagihanWarga({
 
             {/* Add triggers for logged in admins & general actions (Print Buku Tagihan) */}
             <div className="w-full xl:w-auto flex flex-col md:flex-row items-stretch xl:items-center gap-2 shrink-0">
+              {isLoggedIn && (currentUser?.role === 'admin' || currentUser?.role === 'bendahara') && (
+                <button
+                  type="button"
+                  onClick={syncPaymentsFromLedger}
+                  className="bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-extrabold px-3 py-2 rounded-lg transition duration-200 text-xs whitespace-nowrap cursor-pointer flex items-center justify-center gap-1 border border-emerald-200 active:scale-95 shadow-xs"
+                  title="Sinkronkan dan tandai lunas otomatis semua tagihan warga berdasarkan transaksi Buku Kas yang ada"
+                >
+                  <RefreshCw className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span>Sinkronkan Dari Buku Kas</span>
+                </button>
+              )}
+
               <button
                 onClick={() => setShowPrintBillingModal(true)}
                 className="bg-slate-50 hover:bg-slate-100 text-slate-700 font-extrabold px-3 py-2 rounded-lg transition duration-200 text-xs whitespace-nowrap cursor-pointer flex items-center justify-center gap-1 border border-slate-205 w-full md:w-auto active:scale-95"
@@ -9911,7 +10260,7 @@ export default function TagihanWarga({
                   <div className="text-[10px] text-slate-400 font-medium">Iuran RT Selesai</div>
                   <div className="text-lg font-black font-mono text-emerald-800 mt-1">
                     Rp {selectedWargaHistory.iuranRT
-                      .filter(b => b.lunas && (b.tahun === historyYear || (!b.tahun && historyYear === 2026)))
+                      .filter(b => b.lunas && isMatchSlot(b, b.bulan, historyYear))
                       .reduce((sum, b) => sum + b.nominal, 0).toLocaleString('id-ID')}
                   </div>
                 </div>
@@ -9924,11 +10273,8 @@ export default function TagihanWarga({
                       Rp {(() => {
                         let totalTunggakan = 0;
                         fullMonths.forEach(m => {
-                          const shortM = m.slice(0, 3);
                           const slot = selectedWargaHistory.iuranRT.find(b => 
-                            b.lunas &&
-                            (b.tahun === historyYear || (!b.tahun && historyYear === 2026)) &&
-                            (b.bulan.toLowerCase() === m.toLowerCase() || b.bulan.toLowerCase() === shortM.toLowerCase())
+                            b.lunas && isMatchSlot(b, m, historyYear)
                           );
                           if (!slot && isMonthDue(m, historyYear)) {
                             totalTunggakan += getDefaultRtRate(historyYear, m, rateRT);
@@ -10157,10 +10503,8 @@ export default function TagihanWarga({
                         onClick={() => {
                           const initialStatus: {[key: string]: boolean} = {};
                           fullMonths.forEach(m => {
-                            const shortM = m.slice(0, 3);
                             const slot = selectedWargaHistory.iuranRT.find(b => 
-                              (b.tahun === historyYear || (!b.tahun && historyYear === 2026)) &&
-                              (b.bulan.toLowerCase() === m.toLowerCase() || b.bulan.toLowerCase() === shortM.toLowerCase())
+                              isMatchSlot(b, m, historyYear)
                             );
                             initialStatus[m] = slot ? slot.lunas : false;
                           });
@@ -10267,10 +10611,8 @@ export default function TagihanWarga({
                         onClick={() => {
                           const updated = { ...batchPaymentSelectedMonths };
                           fullMonths.forEach(m => {
-                            const shortM = m.slice(0, 3);
                             const slot = selectedWargaHistory.iuranRT.find(b => 
-                              (b.tahun === historyYear || (!b.tahun && historyYear === 2026)) &&
-                              (b.bulan.toLowerCase() === m.toLowerCase() || b.bulan.toLowerCase() === shortM.toLowerCase())
+                              isMatchSlot(b, m, historyYear)
                             );
                             const isLunas = slot ? slot.lunas : false;
                             if (!isLunas) {
@@ -10345,12 +10687,9 @@ export default function TagihanWarga({
                     })
                     .map((IndoMonth) => {
                       const idx = fullMonths.indexOf(IndoMonth);
-                      const shortMonth = IndoMonth.slice(0, 3);
                       
                       const matchedSlot = selectedWargaHistory.iuranRT.find(
-                        slot => (slot.tahun === historyYear || (!slot.tahun && historyYear === 2026)) &&
-                                (slot.bulan.toLowerCase() === IndoMonth.toLowerCase() || 
-                                 slot.bulan.toLowerCase() === shortMonth.toLowerCase())
+                        slot => isMatchSlot(slot, IndoMonth, historyYear)
                       );
 
                       const isLunas = matchedSlot ? matchedSlot.lunas : false;
@@ -10772,7 +11111,7 @@ export default function TagihanWarga({
                   <div className="text-[10px] text-slate-405 font-medium">Sewa & Iuran Lapak Selesai</div>
                   <div className="text-lg font-black font-mono text-emerald-800 mt-1">
                     Rp {selectedRombongHistory.iuranRombong
-                      .filter(b => b.lunas && (b.tahun === historyYear || (!b.tahun && historyYear === 2026)))
+                      .filter(b => b.lunas && isMatchSlot(b, b.bulan, historyYear))
                       .reduce((sum, b) => sum + b.nominal, 0).toLocaleString('id-ID')}
                   </div>
                 </div>
@@ -10785,11 +11124,8 @@ export default function TagihanWarga({
                       Rp {(() => {
                         let totalTunggakan = 0;
                         fullMonths.forEach(m => {
-                          const shortM = m.slice(0, 3);
                           const slot = selectedRombongHistory.iuranRombong.find(b => 
-                            b.lunas &&
-                            (b.tahun === historyYear || (!b.tahun && historyYear === 2026)) &&
-                            (b.bulan.toLowerCase() === m.toLowerCase() || b.bulan.toLowerCase() === shortM.toLowerCase())
+                            b.lunas && isMatchSlot(b, m, historyYear)
                           );
                           if (!slot && isMonthDue(m, historyYear)) {
                             totalTunggakan += getDefaultRombongRate(historyYear, m, rateRombong);
@@ -10813,11 +11149,8 @@ export default function TagihanWarga({
                 </h5>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
                   {fullMonths.map((IndoMonth, idx) => {
-                    const shortMonth = IndoMonth.slice(0, 3);
                     const matchedSlot = selectedRombongHistory.iuranRombong.find(
-                      slot => (slot.tahun === historyYear || (!slot.tahun && historyYear === 2026)) &&
-                              (slot.bulan.toLowerCase() === IndoMonth.toLowerCase() || 
-                               slot.bulan.toLowerCase() === shortMonth.toLowerCase())
+                      slot => isMatchSlot(slot, IndoMonth, historyYear)
                     );
 
                     const isLunas = matchedSlot ? matchedSlot.lunas : false;
@@ -11259,8 +11592,7 @@ export default function TagihanWarga({
                               : fullMonths;
                             return defaultMonths.map((m) => {
                               const slot = w.iuranRT.find(b => 
-                                b.bulan.toLowerCase() === m.toLowerCase() && 
-                                (b.tahun === selectedBillingYear || (!b.tahun && selectedBillingYear === 2026))
+                                isMatchSlot(b, m, selectedBillingYear)
                               ) || { bulan: m, lunas: false, nominal: getDefaultRtRate(selectedBillingYear, m, rateRT), tahun: selectedBillingYear };
 
                               return (
@@ -11513,8 +11845,7 @@ export default function TagihanWarga({
                               : fullMonths;
                             return defaultMonths.map((m) => {
                               const slot = r.iuranRombong.find(b => 
-                                b.bulan.toLowerCase() === m.toLowerCase() && 
-                                (b.tahun === selectedBillingYear || (!b.tahun && selectedBillingYear === 2026))
+                                isMatchSlot(b, m, selectedBillingYear)
                               ) || { bulan: m, lunas: false, nominal: getDefaultRombongRate(selectedBillingYear, m, rateRombong), tahun: selectedBillingYear };
 
                               const isPendingApp = slot.lunas && (slot as any).isCustom && !(slot as any).approved;

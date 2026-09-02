@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Balance, LedgerEntry, AppUser, WargaBill, RombongBill } from '../types';
 import { calculateStorageFootprint, formatFileSize } from '../utils/fileSizeUtils';
 import { compressImage } from '../utils/fileCompressor';
+import { isInternalMutationOrTransfer, isMutasiTx } from '../utils/mutationUtils';
 import ImageCropperModal from './ImageCropperModal';
 import { getCollectorBalancesForPeriod } from '../utils/collectorUtils';
 import { 
@@ -95,141 +96,6 @@ export default function Dashboard({
   }, [ledger]);
 
   const activeKas = derivedKas;
-
-  const pettyCashBreakdown = React.useMemo(() => {
-    let totalMasuk = 0;
-    let totalKeluar = 0;
-
-    ledger.forEach(item => {
-      if (item.kategori === 'Penarikan Dana Kolektor') {
-        return;
-      }
-      
-      const val = item.jumlah;
-      const isPemasukan = item.tipe === 'pemasukan';
-      
-      if (item.sumberKas === 'rtPettyCash') {
-        if (isPemasukan) {
-          totalMasuk += val;
-        } else {
-          totalKeluar += val;
-        }
-      }
-    });
-
-    return {
-      totalMasuk,
-      totalKeluar
-    };
-  }, [ledger]);
-
-  const rtTunaiBreakdown = React.useMemo(() => {
-    let totalMasuk = 0;
-    let totalKeluar = 0;
-
-    ledger.forEach(item => {
-      if (item.kategori === 'Penarikan Dana Kolektor') {
-        return;
-      }
-      
-      const val = item.jumlah;
-      const isPemasukan = item.tipe === 'pemasukan';
-      
-      if (item.sumberKas === 'rtTunai') {
-        if (isPemasukan) {
-          totalMasuk += val;
-        } else {
-          totalKeluar += val;
-        }
-      }
-    });
-
-    return {
-      totalMasuk,
-      totalKeluar
-    };
-  }, [ledger]);
-
-  const rtBankBreakdown = React.useMemo(() => {
-    let totalMasuk = 0;
-    let totalKeluar = 0;
-
-    ledger.forEach(item => {
-      if (item.kategori === 'Penarikan Dana Kolektor') {
-        return;
-      }
-      
-      const val = item.jumlah;
-      const isPemasukan = item.tipe === 'pemasukan';
-      
-      if (item.sumberKas === 'rtBank') {
-        if (isPemasukan) {
-          totalMasuk += val;
-        } else {
-          totalKeluar += val;
-        }
-      }
-    });
-
-    return {
-      totalMasuk,
-      totalKeluar
-    };
-  }, [ledger]);
-
-  const rombongTunaiBreakdown = React.useMemo(() => {
-    let totalMasuk = 0;
-    let totalKeluar = 0;
-
-    ledger.forEach(item => {
-      if (item.kategori === 'Penarikan Dana Kolektor') {
-        return;
-      }
-      
-      const val = item.jumlah;
-      const isPemasukan = item.tipe === 'pemasukan';
-      
-      if (item.sumberKas === 'rombongTunai') {
-        if (isPemasukan) {
-          totalMasuk += val;
-        } else {
-          totalKeluar += val;
-        }
-      }
-    });
-
-    return {
-      totalMasuk,
-      totalKeluar
-    };
-  }, [ledger]);
-
-  const rombongBankBreakdown = React.useMemo(() => {
-    let totalMasuk = 0;
-    let totalKeluar = 0;
-
-    ledger.forEach(item => {
-      if (item.kategori === 'Penarikan Dana Kolektor') {
-        return;
-      }
-      
-      const val = item.jumlah;
-      const isPemasukan = item.tipe === 'pemasukan';
-      
-      if (item.sumberKas === 'rombongBank') {
-        if (isPemasukan) {
-          totalMasuk += val;
-        } else {
-          totalKeluar += val;
-        }
-      }
-    });
-
-    return {
-      totalMasuk,
-      totalKeluar
-    };
-  }, [ledger]);
 
   const colBalancesRT = currentUser ? getCollectorBalancesForPeriod(ledger, currentUser.username, currentUser.nama, 'rtPettyCash') : { totalCollected: 0, totalPenarikan: 0, remaining: 0 };
   const colBalancesRombong = currentUser ? getCollectorBalancesForPeriod(ledger, currentUser.username, currentUser.nama, 'rombongTunai') : { totalCollected: 0, totalPenarikan: 0, remaining: 0 };
@@ -555,52 +421,6 @@ export default function Dashboard({
     }
   };
 
-  // Helper to identify internal non-operational transfers
-  const isMutasiTx = (e: LedgerEntry) => {
-    const cat = (e.kategori || '').toLowerCase().trim();
-    const desc = (e.deskripsi || '').toLowerCase().trim();
-    return (
-      cat === 'setor bank' ||
-      cat === 'mutasi bank-petty' ||
-      cat === 'mutasi bank-kas' ||
-      cat === 'mutasi kas' ||
-      cat === 'transfer kas' ||
-      cat === 'penarikan dana kolektor' ||
-      cat === 'penyesuaian saldo' ||
-      cat.includes('mutasi') ||
-      cat.includes('setor bank') ||
-      cat.includes('pemindahbukuan') ||
-      cat.includes('penarikan dana kolektor') ||
-      cat.includes('alokasi dana') ||
-      desc.includes('mutasi') ||
-      desc.includes('setor bank') ||
-      desc.includes('pemindahbukuan') ||
-      desc.includes('penarikan dana kolektor') ||
-      desc.includes('alokasi dana') ||
-      desc.includes('pengembalian dana') ||
-      desc.includes('petty cash ke') ||
-      desc.includes('ke petty cash') ||
-      desc.includes('petty ke') ||
-      desc.includes('ke petty') ||
-      desc.includes('kas kecil ke') ||
-      desc.includes('ke kas kecil') ||
-      desc.includes('dari kas kecil') ||
-      desc.includes('dari petty cash') ||
-      desc.includes('isi kas kecil') ||
-      desc.includes('mengisi kas kecil') ||
-      desc.includes('pengisian kas kecil') ||
-      desc.includes('tarik kas bank') ||
-      desc.includes('tarik dari bank') ||
-      desc.includes('penyetoran sisa') ||
-      desc.includes('penyesuaian saldo') ||
-      desc.includes('saldo opname') ||
-      desc.includes('transfer kas') ||
-      desc.includes('transfer antar') ||
-      desc.includes('pindah kas') ||
-      desc.includes('pindah dana')
-    );
-  };
-
   // Aggregation calculations for stats cards (excluding internal transfers)
   const totalPemasukan = ledger
     .filter(e => e.tipe === 'pemasukan' && !isMutasiTx(e))
@@ -730,45 +550,40 @@ export default function Dashboard({
             {/* Rincian Komprehensif Seluruh Rekening & Kas RT */}
             {!isKolektor && !isKolektor2 && (
               <div className="mt-3 pl-5 border-l-2 border-slate-700/80 flex flex-col gap-2.5 text-[11px] text-slate-300 font-mono leading-relaxed bg-slate-950/40 p-3.5 rounded-xl border border-slate-800/60">
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                  <span className="w-2 h-2 rounded-full bg-indigo-400 shrink-0" />
-                  <span className="text-slate-200 font-bold">Kas Kecil RT (Petty Cash):</span>
-                  <span className="text-indigo-300 font-extrabold text-xs">Rp {activeKas.rtPettyCash.toLocaleString('id-ID')}</span>
-                  <span className="text-[10px] text-slate-400 font-sans">
-                    (Masuk: <span className="text-emerald-400 font-mono font-bold">Rp {pettyCashBreakdown.totalMasuk.toLocaleString('id-ID')}</span> | Keluar: <span className="text-rose-400 font-mono font-bold">Rp {pettyCashBreakdown.totalKeluar.toLocaleString('id-ID')}</span>)
-                  </span>
+                <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-indigo-400 shrink-0" />
+                    <span className="text-slate-200 font-bold">Kas Kecil RT (Petty Cash):</span>
+                  </div>
+                  <span className="text-indigo-300 font-extrabold text-xs font-mono">Rp {activeKas.rtPettyCash.toLocaleString('id-ID')}</span>
                 </div>
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                  <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />
-                  <span className="text-slate-200 font-bold">Iuran RT Tunai:</span>
-                  <span className="text-amber-300 font-extrabold text-xs">Rp {activeKas.rtTunai.toLocaleString('id-ID')}</span>
-                  <span className="text-[10px] text-slate-400 font-sans">
-                    (Masuk: <span className="text-emerald-400 font-mono font-bold">Rp {rtTunaiBreakdown.totalMasuk.toLocaleString('id-ID')}</span> | Keluar: <span className="text-rose-400 font-mono font-bold">Rp {rtTunaiBreakdown.totalKeluar.toLocaleString('id-ID')}</span>)
-                  </span>
+                <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />
+                    <span className="text-slate-200 font-bold">Iuran RT Tunai:</span>
+                  </div>
+                  <span className="text-amber-300 font-extrabold text-xs font-mono">Rp {activeKas.rtTunai.toLocaleString('id-ID')}</span>
                 </div>
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                  <span className="w-2 h-2 rounded-full bg-sky-400 shrink-0" />
-                  <span className="text-slate-200 font-bold">Kas Umum Bank RT:</span>
-                  <span className="text-sky-300 font-extrabold text-xs">Rp {activeKas.rtBank.toLocaleString('id-ID')}</span>
-                  <span className="text-[10px] text-slate-400 font-sans">
-                    (Masuk: <span className="text-emerald-400 font-mono font-bold">Rp {rtBankBreakdown.totalMasuk.toLocaleString('id-ID')}</span> | Keluar: <span className="text-rose-400 font-mono font-bold">Rp {rtBankBreakdown.totalKeluar.toLocaleString('id-ID')}</span>)
-                  </span>
+                <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-sky-400 shrink-0" />
+                    <span className="text-slate-200 font-bold">Kas Umum Bank RT:</span>
+                  </div>
+                  <span className="text-sky-300 font-extrabold text-xs font-mono">Rp {activeKas.rtBank.toLocaleString('id-ID')}</span>
                 </div>
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                  <span className="w-2 h-2 rounded-full bg-teal-400 shrink-0" />
-                  <span className="text-slate-200 font-bold">Kas Bank Rombong:</span>
-                  <span className="text-teal-300 font-extrabold text-xs">Rp {activeKas.rombongBank.toLocaleString('id-ID')}</span>
-                  <span className="text-[10px] text-slate-400 font-sans">
-                    (Masuk: <span className="text-emerald-400 font-mono font-bold">Rp {rombongBankBreakdown.totalMasuk.toLocaleString('id-ID')}</span> | Keluar: <span className="text-rose-400 font-mono font-bold">Rp {rombongBankBreakdown.totalKeluar.toLocaleString('id-ID')}</span>)
-                  </span>
+                <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-teal-400 shrink-0" />
+                    <span className="text-slate-200 font-bold">Kas Bank Rombong:</span>
+                  </div>
+                  <span className="text-teal-300 font-extrabold text-xs font-mono">Rp {activeKas.rombongBank.toLocaleString('id-ID')}</span>
                 </div>
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
-                  <span className="text-slate-200 font-bold">Kas Rombong Tunai:</span>
-                  <span className="text-emerald-300 font-extrabold text-xs">Rp {activeKas.rombongTunai.toLocaleString('id-ID')}</span>
-                  <span className="text-[10px] text-slate-400 font-sans">
-                    (Masuk: <span className="text-emerald-400 font-mono font-bold">Rp {rombongTunaiBreakdown.totalMasuk.toLocaleString('id-ID')}</span> | Keluar: <span className="text-rose-400 font-mono font-bold">Rp {rombongTunaiBreakdown.totalKeluar.toLocaleString('id-ID')}</span>)
-                  </span>
+                <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
+                    <span className="text-slate-200 font-bold">Kas Rombong Tunai:</span>
+                  </div>
+                  <span className="text-emerald-300 font-extrabold text-xs font-mono">Rp {activeKas.rombongTunai.toLocaleString('id-ID')}</span>
                 </div>
 
                 {/* Total Rekening Bank Gabungan RT & Rombong */}

@@ -2052,6 +2052,8 @@ export default function App() {
 
   const handleDeleteEventCoupon = async (eventId: string) => {
     setEventCoupons(prev => prev.filter(e => e.id !== eventId));
+    setCouponOrders(prev => prev.filter(o => o.eventId !== eventId));
+    setEventLedgerList(prev => prev.filter(l => l.eventId !== eventId));
     if (isSupabaseConfigured) {
       await deleteEventCoupon(eventId);
     } else if (isFirebaseConfigured) {
