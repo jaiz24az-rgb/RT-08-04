@@ -68,6 +68,11 @@ async function startServer() {
     next();
   });
 
+  // API health check route for container and reverse proxy readiness checks
+  app.get('/api/health', (req, res) => {
+    res.json({ status: 'ok' });
+  });
+
   // REST API Endpoints
 
   // 1. Check local sync status and retrieve host machine IPs
@@ -150,4 +155,7 @@ async function startServer() {
   });
 }
 
-startServer();
+startServer().catch((err) => {
+  console.error('Failed to start server:', err);
+  process.exit(1);
+});

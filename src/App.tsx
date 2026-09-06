@@ -43,6 +43,7 @@ import {
 } from './supabase';
 import Dashboard from './components/Dashboard';
 import { safeStorage as localStorage } from './utils/safeStorage';
+import { getStoredSnapshots, saveStoredSnapshots, createSnapshotItem } from './utils/snapshotHelper';
 import TagihanWarga, { getDefaultRombongRate } from './components/TagihanWarga';
 import Ledger from './components/Ledger';
 import BukuKolektor from './components/BukuKolektor';
@@ -2316,36 +2317,21 @@ export default function App() {
 
     hasAutoBackedUpRef.current = true;
     try {
-      const savedSnaps = localStorage.getItem('perumtas_rt08_snapshots');
-      let snapshots: any[] = savedSnaps ? JSON.parse(savedSnaps) : [];
-
+      const snapshots = getStoredSnapshots();
       const now = Date.now();
       const SIXTEEN_HOURS = 16 * 60 * 60 * 1000;
       const latestAuto = snapshots.find(s => s.type === 'auto');
 
       if (!latestAuto || (now - Number(latestAuto.id.split('-')[1])) > SIXTEEN_HOURS) {
-        const timeStr = new Intl.DateTimeFormat('id-ID', {
-          day: 'numeric',
-          month: 'short',
-          year: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit'
-        }).format(new Date());
-
-        const newSnap = {
-          id: `snap-${now}`,
-          timestamp: new Date().toISOString(),
-          dateString: timeStr,
-          label: 'Backup Harian Otomatis',
-          type: 'auto',
+        const newSnap = createSnapshotItem('Backup Harian Otomatis', 'auto', {
           kas,
           ledger,
           wargaList,
           rombongList
-        };
+        });
 
-        const updated = [newSnap, ...snapshots].slice(0, 20); // Keep last 20 elements
-        localStorage.setItem('perumtas_rt08_snapshots', JSON.stringify(updated));
+        const updated = [newSnap, ...snapshots.filter(s => s.id !== newSnap.id)].slice(0, 20); // Keep last 20 elements
+        saveStoredSnapshots(updated);
         console.info('✓ Captured daily auto snapshot backup in localStorage.');
       }
     } catch (e) {

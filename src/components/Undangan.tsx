@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { safeStorage as localStorage } from '../utils/safeStorage';
+import { getStoredSnapshots, saveStoredSnapshots, createSnapshotItem } from '../utils/snapshotHelper';
 import { 
   Mail, 
   Send, 
@@ -333,17 +334,24 @@ export default function Undangan({
   useEffect(() => {
     if (showSettingsModal) {
       try {
-        const saved = localStorage.getItem('perumtas_rt08_snapshots');
-        if (saved) {
-          setSnapshots(JSON.parse(saved));
-        } else {
-          setSnapshots([]);
+        let snaps = getStoredSnapshots();
+        // If no snapshot exists yet, but data exists in ledger or wargaList, automatically initialize a baseline snapshot
+        if (snaps.length === 0 && (wargaList.length > 0 || ledger.length > 0)) {
+          const initialSnap = createSnapshotItem('Titik Awal Pembukuan Sistem', 'auto', {
+            kas,
+            ledger,
+            wargaList,
+            rombongList
+          });
+          snaps = [initialSnap];
+          saveStoredSnapshots(snaps);
         }
+        setSnapshots(snaps);
       } catch (e) {
         console.warn('Gagal memuat snaps:', e);
       }
     }
-  }, [showSettingsModal]);
+  }, [showSettingsModal, kas, ledger, wargaList, rombongList]);
 
   const [showAddRombongModal, setShowAddRombongModal] = useState(false);
   const [newRombong, setNewRombong] = useState({
@@ -368,38 +376,28 @@ export default function Undangan({
 
   // --- ADMINISTRATOR SNAPSHOT & UNDO FUNCTIONS ---
   const handleCreateManualSnapshot = () => {
-    const label = manualSnapLabel.trim();
-    if (!label) {
-      alert('Harap masukkan nama/label snapshot!');
-      return;
-    }
-    try {
-      const now = Date.now();
-      const timeStr = new Intl.DateTimeFormat('id-ID', {
-        day: 'numeric',
-        month: 'short',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      }).format(new Date());
+    const timeStr = new Intl.DateTimeFormat('id-ID', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    }).format(new Date());
 
-      const newSnap = {
-        id: `snap-${now}`,
-        timestamp: new Date().toISOString(),
-        dateString: timeStr,
-        label: label,
-        type: 'manual',
+    const label = manualSnapLabel.trim() || `Snapshot Manual (${timeStr})`;
+    try {
+      const newSnap = createSnapshotItem(label, 'manual', {
         kas,
         ledger,
         wargaList,
         rombongList
-      };
+      });
 
-      const updated = [newSnap, ...snapshots].slice(0, 20); // Keep last 20
+      const updated = [newSnap, ...snapshots.filter(s => s.id !== newSnap.id)].slice(0, 20); // Keep last 20
       setSnapshots(updated);
-      localStorage.setItem('perumtas_rt08_snapshots', JSON.stringify(updated));
+      saveStoredSnapshots(updated);
       setManualSnapLabel('');
-      showToast(`Snapshot "${label}" berhasil disimpan!`);
+      showToast(`Snapshot "${label}" berhasil disimpan di memori gawai!`);
     } catch (e) {
       alert('Gagal membuat snapshot: ' + String(e));
     }
@@ -414,7 +412,7 @@ export default function Undangan({
     const now = Date.now();
     const TWELVE_HOURS = 12 * 60 * 60 * 1000;
     
-    // Look for any backup that is older than 12 hours (could be auto or manual)
+    // Look for any backup that is older than 12 hours (could be auto, export or manual)
     const olderSnaps = snapshots.filter(s => {
       const snapTime = Number(s.id.split('-')[1]);
       return (now - snapTime) > TWELVE_HOURS;
@@ -474,41 +472,56 @@ export default function Undangan({
   };
 
   const handleDeleteSnapshot = (id: string, label: string) => {
-    if (!confirm(`Hapus snapshot "${label}" dari daftar backup?`)) return;
+    if (!confirm(`Hapus snapshot "${label}" dari daftar backup gawai?`)) return;
     const updated = snapshots.filter(s => s.id !== id);
     setSnapshots(updated);
-    localStorage.setItem('perumtas_rt08_snapshots', JSON.stringify(updated));
+    saveStoredSnapshots(updated);
     showToast(`Snapshot "${label}" dihapus.`);
   };
 
   const handleExportPhysicalBackup = () => {
     try {
+      const now = new Date();
+      const timeStr = new Intl.DateTimeFormat('id-ID', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      }).format(now);
+
       const payload = {
         rt08_backup_ver: "1.0",
-        timestamp: new Date().toISOString(),
-        dateString: new Intl.DateTimeFormat('id-ID', {
-          day: 'numeric',
-          month: 'long',
-          year: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit'
-        }).format(new Date()),
+        timestamp: now.toISOString(),
+        dateString: timeStr,
         kas,
         ledger,
         wargaList,
         rombongList
       };
 
+      // 1. Download file to local storage device
       const jsonString = `data:text/json;charset=utf-8,${encodeURIComponent(
         JSON.stringify(payload, null, 2)
       )}`;
       const downloadAnchor = document.createElement('a');
       downloadAnchor.setAttribute("href", jsonString);
-      downloadAnchor.setAttribute("download", `BACKUP_KAS_RT08_${new Date().toISOString().split('T')[0]}.json`);
+      downloadAnchor.setAttribute("download", `BACKUP_KAS_RT08_${now.toISOString().split('T')[0]}.json`);
       document.body.appendChild(downloadAnchor);
       downloadAnchor.click();
       downloadAnchor.remove();
-      showToast("Ekspor berkas backup JSON sukses diunduh.");
+
+      // 2. Register checkpoint immediately into local device snapshot list
+      const exportSnap = createSnapshotItem(
+        `Unduhan Berkas Fisik JSON (${ledger.length} Transaksi, ${wargaList.length} Warga)`,
+        'export',
+        { kas, ledger, wargaList, rombongList }
+      );
+      const updated = [exportSnap, ...snapshots.filter(s => s.id !== exportSnap.id)].slice(0, 20);
+      setSnapshots(updated);
+      saveStoredSnapshots(updated);
+
+      showToast("Berkas JSON berhasil diunduh & dicatat di Riwayat Titik Backup Gawai!");
     } catch (e) {
       alert("Gagal mengekspor data: " + String(e));
     }
@@ -537,6 +550,16 @@ export default function Undangan({
         );
 
         if (!confirmImport) return;
+
+        // Auto-save a safety checkpoint before importing
+        const safetySnap = createSnapshotItem(
+          `Sebelum Pulihkan Berkas JSON (${new Intl.DateTimeFormat('id-ID', { hour: '2-digit', minute: '2-digit' }).format(new Date())})`,
+          'auto',
+          { kas, ledger, wargaList, rombongList }
+        );
+        const nextSnaps = [safetySnap, ...snapshots].slice(0, 20);
+        saveStoredSnapshots(nextSnaps);
+        setSnapshots(nextSnaps);
 
         if (onRestoreSnapshot) {
           onRestoreSnapshot({
@@ -4489,27 +4512,39 @@ _Pesan Whatsapp ini dikirim secara resmi melalui Sistem Informasi Administrasi R
                   </h5>
 
                   {snapshots.length === 0 ? (
-                    <div className="text-center py-6 text-slate-400 italic text-[11px] bg-slate-50 border border-dashed border-slate-200 rounded-xl">
-                      Belum terdapat titik backup otomatis ataupun kustom yang tersimpan di memori perangkat ini.
+                    <div className="text-center py-6 px-4 bg-slate-50 border border-dashed border-slate-200 rounded-xl space-y-2.5">
+                      <p className="text-slate-400 italic text-[11px]">
+                        Belum terdapat titik backup otomatis ataupun kustom yang tersimpan di memori perangkat ini.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={handleCreateManualSnapshot}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-black shadow-sm transition active:scale-95 cursor-pointer"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Simpan Titik Backup Sekarang</span>
+                      </button>
                     </div>
                   ) : (
-                    <div className="overflow-y-auto max-h-48 divide-y divide-slate-100 pr-1 select-none">
+                    <div className="overflow-y-auto max-h-56 divide-y divide-slate-100 pr-1 select-none">
                       {snapshots.map((snap: any) => (
                         <div key={snap.id} className="flex items-center justify-between py-2.5 gap-4">
                           <div className="min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
-                              <span className={`px-1.5 py-0.5 rounded text-[9px] font-extrabold uppercase ${
+                              <span className={`px-2 py-0.5 rounded text-[9px] font-extrabold uppercase ${
                                 snap.type === 'auto'
-                                  ? 'bg-sky-50 border border-sky-100/55 text-sky-700'
-                                  : 'bg-indigo-50 border border-indigo-100/55 text-indigo-700'
+                                  ? 'bg-sky-50 border border-sky-100 text-sky-700'
+                                  : snap.type === 'export'
+                                  ? 'bg-emerald-50 border border-emerald-100 text-emerald-700'
+                                  : 'bg-indigo-50 border border-indigo-100 text-indigo-700'
                               }`}>
-                                {snap.type === 'auto' ? 'Otomatis' : 'Kustom'}
+                                {snap.type === 'auto' ? 'Otomatis' : snap.type === 'export' ? 'Unduhan JSON' : 'Kustom'}
                               </span>
                               <span className="text-[11px] font-extrabold text-slate-800 tracking-tight leading-tight shrink-0 font-sans">
                                 {snap.dateString}
                               </span>
                             </div>
-                            <p className="text-[11px] text-slate-500 mt-1 truncate font-medium font-sans">
+                            <p className="text-[11px] text-slate-600 mt-1 truncate font-medium font-sans">
                               {snap.label}
                             </p>
                           </div>
