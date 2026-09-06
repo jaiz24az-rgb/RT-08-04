@@ -469,9 +469,97 @@ export default function Ledger({
     }
   };
 
+  // Helper to extract clean person name from transaction description without appending descriptions
+  const extractCleanPayerName = (desc: string): string => {
+    if (!desc) return '';
+    const raw = desc.trim();
+
+    // Financial, event, and descriptive stop words that must NOT be part of a person's name
+    const STOP_WORDS = new Set([
+      // Money, cash & finance
+      'uang', 'dana', 'duit', 'nominal', 'sebesar', 'sejumlah', 'senilai', 'rp', 'rupiah',
+      'cash', 'tunai', 'transfer', 'rek', 'rekening', 'bank', 'bca', 'bri', 'mandiri', 'bni', 'bsi', 'qris', 'via',
+      // Transaction terms
+      'hibah', 'sumbangan', 'donasi', 'infaq', 'infak', 'sedekah', 'bantuan', 'titipan', 'titip',
+      'pemberian', 'hadiah', 'honor', 'sisa', 'kas', 'iuran', 'sewa', 'pembelian', 'beli',
+      'penjualan', 'jual', 'pembangunan', 'pengadaan', 'bayar', 'pembayaran', 'pelunasan',
+      'kembalian', 'pengembalian', 'anggaran', 'alokasi', 'belanja', 'biaya', 'ongkos', 'potongan', 'denda',
+      // Prepositions, purposes & conjunctions
+      'untuk', 'guna', 'peruntukan', 'keperluan', 'terkait', 'dalam', 'rangka', 'buat', 'bagi',
+      'atas', 'sebagai', 'karena', 'oleh', 'dari', 'ke', 'di', 'pada', 'dan', 'dengan', 'an', 'an.', 'a.n', 'a.n.',
+      // Activities, events, sports & competitions
+      'lomba', 'hasil', 'acara', 'kegiatan', 'konsumsi', 'makan', 'minum', 'snack',
+      'peringatan', 'agustusan', 'agustus', 'hari', 'kemerdekaan', 'hut', 'ri',
+      'voli', 'volly', 'futsal', 'sepakbola', 'badminton', 'bulutangkis', 'tenis', 'senam',
+      'jalan', 'sehat', 'santai', 'karnaval', 'bazar', 'bazaar', 'panggung', 'gembira',
+      'rapat', 'arisan', 'kerja', 'bakti', 'gotong', 'royong', 'posyandu', 'pkk',
+      'keamanan', 'pos', 'kamling', 'ronda', 'kebersihan', 'sampah', 'lampu', 'penerangan',
+      'tarik', 'tambang', 'balap', 'karung', 'kelereng', 'gaple', 'catur',
+      // Units & addresses
+      'rt', 'rw', 'blok', 'unit', 'lapak', 'no', 'nomor', 'kav', 'kavling', 'gang', 'jl', 'jalan',
+      // Dates & months
+      'tgl', 'tanggal', 'bulan', 'bln', 'tahun', 'thn', 'periode',
+      'jan', 'januari', 'feb', 'februari', 'mar', 'maret', 'apr', 'april', 'mei', 'jun', 'juni',
+      'jul', 'juli', 'agt', 'agustus', 'agu', 'sep', 'september', 'okt', 'oktober', 'nov', 'november', 'des', 'desember'
+    ]);
+
+    let target = '';
+
+    // Match preposition anchor if present: "dari", "oleh", "penyetor", "an", "atas nama"
+    const anchorMatch = raw.match(/(?:hibah\s+dari|sumbangan\s+dari|donasi\s+dari|titipan\s+dari|pemberian\s+dari|diterima\s+dari|transfer\s+dari|penyetoran\s+dari|setoran\s+dari|terima\s+dari|dari|oleh|penyetor(?:\s*:)?|an(?:\.|\s)|atas\s+nama)\s+(.+)/i);
+    if (anchorMatch && anchorMatch[1]) {
+      target = anchorMatch[1].trim();
+    } else {
+      // If starts with transaction type like "Hibah Pak...", "Sumbangan Ibu..."
+      const prefixTypeMatch = raw.match(/^(?:hibah|sumbangan|donasi|infaq|infak|sedekah|titipan|titip|pemberian|bantuan|setoran|hadiah)\s+(.+)/i);
+      if (prefixTypeMatch && prefixTypeMatch[1]) {
+        target = prefixTypeMatch[1].trim();
+      } else {
+        target = raw;
+      }
+    }
+
+    // Tokenize target by whitespace
+    const rawTokens = target.split(/\s+/);
+    const nameParts: string[] = [];
+
+    for (let i = 0; i < rawTokens.length; i++) {
+      const rawToken = rawTokens[i].trim();
+      if (!rawToken) continue;
+
+      // Check if token begins with parentheses, bracket, dash, colon, or symbol
+      if (/^[-:()[\]/,;*+]/.test(rawToken)) break;
+      // Check if token contains digits (like numbers, dates, 17, 2026, 50rb)
+      if (/\d/.test(rawToken)) break;
+
+      const cleanWord = rawToken.replace(/^[^a-zA-Z]+|[^a-zA-Z]+$/g, '').toLowerCase();
+      if (!cleanWord) break;
+
+      // If it's a financial or description stop word, stop collecting name immediately!
+      if (STOP_WORDS.has(cleanWord)) {
+        break;
+      }
+
+      nameParts.push(rawToken.replace(/^[^a-zA-Z0-9.]+|[^a-zA-Z0-9.]+$/g, ''));
+
+      // Person names rarely exceed 4 words
+      if (nameParts.length >= 4) {
+        break;
+      }
+    }
+
+    const result = nameParts.join(' ').trim();
+    if (result.length >= 2 && !STOP_WORDS.has(result.toLowerCase())) {
+      return result.replace(/\b[a-z]/g, c => c.toUpperCase());
+    }
+
+    return '';
+  };
+
   const getMatchedBillInfo = (entry: LedgerEntry) => {
     if (!entry || entry.tipe !== 'pemasukan' || !entry.jumlah || entry.jumlah <= 0) return null;
-    const desc = (entry.deskripsi || '').toLowerCase();
+    const rawDesc = (entry.deskripsi || '').trim();
+    const desc = rawDesc.toLowerCase();
     
     const isWargaPayment = desc.includes('iuran rt') || desc.includes('iuranrt');
     const isRombongPayment = desc.includes('iuran rombong') || desc.includes('sewa rombong');
@@ -500,13 +588,18 @@ export default function Ledger({
         const bulanMatch = (entry.deskripsi || '').match(/Bulan ([a-zA-Z\s,]+)\s+(\d{4})/);
         if (bulanMatch) {
           bulan = bulanMatch[1];
-          tahun = parseInt(bulanMatch[2], 10);
+        } else {
+          const bulanMatch = (entry.deskripsi || '').match(/Bulan ([a-zA-Z\s,]+)\s+(\d{4})/);
+          if (bulanMatch) {
+            bulan = bulanMatch[1];
+            tahun = parseInt(bulanMatch[2], 10);
+          }
         }
       }
 
       return {
         id: matched?.id || entry.id || '',
-        nama: matched?.nama || ((entry.deskripsi || '').match(/ - ([^(]+)\(([^)]+)\)/)?.[1]?.trim() || 'Warga RT 08'),
+        nama: matched?.nama || extractCleanPayerName(entry.deskripsi || '') || ((entry.deskripsi || '').match(/ - ([^(]+)\(([^)]+)\)/)?.[1]?.trim() || 'Warga RT 08'),
         tipe: 'warga' as const,
         blok: matched?.blok || ((entry.deskripsi || '').match(/ - ([^(]+)\(([^)]+)\)/)?.[2]?.replace(/Blok/i, '').split('-')[0]?.trim() || ''),
         noRumah: matched?.noRumah || ((entry.deskripsi || '').match(/ - ([^(]+)\(([^)]+)\)/)?.[2]?.replace(/Blok/i, '').split('-')[1]?.trim() || ''),
@@ -551,7 +644,7 @@ export default function Ledger({
 
       return {
         id: matched?.id || entry.id || '',
-        nama: matched?.namaPemilik || ((entry.deskripsi || '').match(/ - ([^(]+)\(([^)]+)\)/)?.[1]?.trim() || 'Pemilik Rombong'),
+        nama: matched?.namaPemilik || extractCleanPayerName(entry.deskripsi || '') || ((entry.deskripsi || '').match(/ - ([^(]+)\(([^)]+)\)/)?.[1]?.trim() || 'Pemilik Rombong'),
         tipe: 'rombong' as const,
         noLapak: matched?.noLapak || ((entry.deskripsi || '').match(/ - ([^(]+)\(([^)]+)\)/)?.[2]?.trim() || ''),
         noWa: matched?.noWa || '',
@@ -567,34 +660,62 @@ export default function Ledger({
       };
     }
 
-    // Fallback for all other general income / dana masuk transactions
+    // Fallback for all other general income / dana masuk transactions (hibah, sumbangan, sponsorship, dll)
     let penyetorNama = 'Penyetor Kas';
-    const rawDesc = (entry.deskripsi || '').trim();
-    
-    // Extract clean person name from description without appending transaction explanation
-    const nameMatch = rawDesc.match(/(?:dari|oleh|penyetor)\s+([a-zA-Z0-9\s.'-]+)/i);
-    let extracted = '';
-    
-    if (nameMatch && nameMatch[1]) {
-      extracted = nameMatch[1].trim();
-    } else {
-      const titleMatch = rawDesc.match(/^(?:bapak|ibu|pak|bu|sdr|sdri)\s+([a-zA-Z0-9\s.'-]+)/i);
-      if (titleMatch && titleMatch[0]) {
-        extracted = titleMatch[0].trim();
-      }
-    }
+    let detailBlok = 'RT 08';
+    let detailNoRumah = 'RW 04';
+    let detailNoWa = '';
+    let detailTipe: 'warga' | 'rombong' = 'warga';
+    let detailCategory = entry.kategori || 'Pemasukan Kas';
 
-    if (extracted) {
-      // Truncate at prepositions or explanation keywords
-      const cutMatch = extracted.match(/^(.+?)(?=\s+(?:untuk|guna|pembelian|peruntukan|sebesar|pembangunan|penjualan|iuran|hibah|kas|rt|rw|via|rek|bank|nominal|tgl|tanggal|periode|acara|\d|,|;|-|\()|$)/i);
-      if (cutMatch && cutMatch[1].trim().length > 0) {
-        extracted = cutMatch[1].trim();
+    // 1. Check if description matches any registered citizen (wargaList)
+    const matchedWarga = (wargaList || []).find(w => {
+      if (!w || !w.nama) return false;
+      const cleanWName = (w.nama || '').replace(/^(?:bp\.|bapak|ibu|bu|pak|bpk|sdr\.|sdri\.|mas|mbak|cak|ning|h\.|hj\.)\s+/i, '').trim().toLowerCase();
+      if (cleanWName.length < 3) return false;
+      const regex = new RegExp(`(?:^|[^a-zA-Z0-9])${cleanWName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:$|[^a-zA-Z0-9])`, 'i');
+      return regex.test(desc);
+    });
+
+    // 2. Check if description matches any registered rombong owner (rombongList)
+    const matchedRombong = !matchedWarga ? (rombongList || []).find(r => {
+      if (!r || !r.namaPemilik) return false;
+      const cleanRName = (r.namaPemilik || '').replace(/^(?:bp\.|bapak|ibu|bu|pak|bpk|sdr\.|sdri\.|mas|mbak|cak|ning|h\.|hj\.)\s+/i, '').trim().toLowerCase();
+      if (cleanRName.length < 3) return false;
+      const regex = new RegExp(`(?:^|[^a-zA-Z0-9])${cleanRName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:$|[^a-zA-Z0-9])`, 'i');
+      return regex.test(desc);
+    }) : null;
+
+    // 3. Extract clean person name from description without appending transaction explanation
+    const extractedCleanName = extractCleanPayerName(rawDesc);
+
+    if (matchedWarga) {
+      if (extractedCleanName && /^(?:pak|bu|bapak|ibu|mas|mbak)\b/i.test(extractedCleanName)) {
+        penyetorNama = extractedCleanName;
+      } else {
+        penyetorNama = matchedWarga.nama;
       }
-      extracted = extracted.replace(/^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$/g, '').trim();
-      
-      const invalidTerms = ['kas', 'pemasukan', 'iuran', 'hibah', 'rombong', 'penjualan', 'bank', 'umum', 'operasional'];
-      if (extracted.length >= 2 && !invalidTerms.includes(extracted.toLowerCase())) {
-        penyetorNama = extracted.replace(/\b\w/g, c => c.toUpperCase());
+      detailBlok = matchedWarga.blok || 'RT 08';
+      detailNoRumah = matchedWarga.noRumah || 'RW 04';
+      detailNoWa = matchedWarga.noWa || '';
+      detailTipe = 'warga';
+    } else if (matchedRombong) {
+      if (extractedCleanName && /^(?:pak|bu|bapak|ibu|mas|mbak)\b/i.test(extractedCleanName)) {
+        penyetorNama = extractedCleanName;
+      } else {
+        penyetorNama = matchedRombong.namaPemilik;
+      }
+      detailBlok = 'Lapak';
+      detailNoRumah = matchedRombong.noLapak || '';
+      detailNoWa = matchedRombong.noWa || '';
+      detailTipe = 'rombong';
+      detailCategory = 'Iuran Rombong';
+    } else if (extractedCleanName) {
+      penyetorNama = extractedCleanName;
+      const blockMatch = rawDesc.match(/(?:blok\s+)?([a-zA-Z]\d{1,2})[-/ ]+(\d{1,3})/i);
+      if (blockMatch) {
+        detailBlok = blockMatch[1].toUpperCase();
+        detailNoRumah = blockMatch[2];
       }
     }
 
@@ -602,13 +723,14 @@ export default function Ledger({
     const tahun = entry.tahun || (entry.tanggal ? parseInt(entry.tanggal.split('-')[0]) || new Date().getFullYear() : new Date().getFullYear());
 
     return {
-      id: entry.id || '',
+      id: matchedWarga?.id || matchedRombong?.id || entry.id || '',
       nama: penyetorNama,
-      tipe: 'warga' as const,
-      blok: 'RT 08',
-      noRumah: 'RW 04',
-      noWa: '',
-      category: entry.kategori || 'Pemasukan Kas',
+      tipe: detailTipe,
+      blok: detailBlok,
+      noRumah: detailNoRumah,
+      noLapak: detailTipe === 'rombong' ? detailNoRumah : undefined,
+      noWa: detailNoWa,
+      category: detailCategory,
       bulan: bulan,
       tahun: tahun,
       nominal: entry.jumlah,
@@ -3670,7 +3792,7 @@ export default function Ledger({
               </h5>
               
               <p className="text-[10.5px] text-slate-650 leading-relaxed mt-2 font-medium font-sans">
-                Terima kasih atas partisipasi aktif Bapak/Ibu <span className="font-extrabold text-emerald-800">{(reprintReceiptInfo.nama || '')}</span> dalam pelunasan {(reprintReceiptInfo.bulan || '').includes(',') ? 'Kolektif ' : ''}<strong className="text-slate-805 font-bold">{(reprintReceiptInfo.category || '')} ({/\b\d{4}\b/.test(reprintReceiptInfo.bulan || '') ? reprintReceiptInfo.bulan : `${reprintReceiptInfo.bulan || ''} ${reprintReceiptInfo.tahun || ''}`})</strong>.
+                Terima kasih atas partisipasi aktif {/^(?:bapak|ibu|pak|bu|mas|mbak|sdr|sdri)\b/i.test(reprintReceiptInfo.nama || '') ? '' : 'Bapak/Ibu '}<span className="font-extrabold text-emerald-800">{(reprintReceiptInfo.nama || '')}</span> dalam pelunasan {(reprintReceiptInfo.bulan || '').includes(',') ? 'Kolektif ' : ''}<strong className="text-slate-805 font-bold">{(reprintReceiptInfo.category || '')} ({/\b\d{4}\b/.test(reprintReceiptInfo.bulan || '') ? reprintReceiptInfo.bulan : `${reprintReceiptInfo.bulan || ''} ${reprintReceiptInfo.tahun || ''}`})</strong>.
               </p>
               
               <p className="text-[10px] text-slate-505 leading-relaxed mt-1.5 font-semibold italic bg-white/70 border border-slate-100 p-1.5 rounded-xl">
@@ -3713,7 +3835,8 @@ export default function Ledger({
                     ? (reprintReceiptInfo.bulan || '') 
                     : `${(reprintReceiptInfo.bulan || '')} ${(reprintReceiptInfo.tahun || '')}`;
 
-                  const textMessage = `Assalamualaikum wr.wb.\n\n*BUKTI PEMBAYARAN IURAN RT 08* ✅\n\nHalo Bapak/Ibu *${(reprintReceiptInfo.nama || '')}*,\nTerima kasih, pembayaran Iuran Anda telah sukses kami verifikasi.\n\n*Detail Pembayaran:*\n• Nama: ${(reprintReceiptInfo.nama || '')}\n• Unit: ${detailLoc}\n• Kategori: ${(reprintReceiptInfo.category || '')}${tipeBayarText}\n• Periode: ${periodeText}\n• Nominal: Rp ${(reprintReceiptInfo.nominal || 0).toLocaleString('id-ID')}\n• Tanggal: ${(reprintReceiptInfo.tanggalBayar || '')} ${(reprintReceiptInfo.jamBayar || '')}\n• Penerima: KAS ${(reprintReceiptInfo.kasPenerima || '').toUpperCase()}\n• Petugas: ${(reprintReceiptInfo.petugas || '')}\n\n*Status:* LUNAS & TERVERIFIKASI 🟢\n\nTerima kasih atas partisipasi aktif Bapak/Ibu dalam mendukung program pembangunan lingkungan RT 08 Perumahan TAS 3.\n\nSalam hangat,\n*Pengurus RT 08 Perumahan TAS 3* 🙏`;
+                  const greetingTitle = /^(?:bapak|ibu|pak|bu|mas|mbak|sdr|sdri)\b/i.test(reprintReceiptInfo.nama || '') ? '' : 'Bapak/Ibu ';
+                  const textMessage = `Assalamualaikum wr.wb.\n\n*BUKTI PEMBAYARAN IURAN RT 08* ✅\n\nHalo ${greetingTitle}*${(reprintReceiptInfo.nama || '')}*,\nTerima kasih, pembayaran Iuran Anda telah sukses kami verifikasi.\n\n*Detail Pembayaran:*\n• Nama: ${(reprintReceiptInfo.nama || '')}\n• Unit: ${detailLoc}\n• Kategori: ${(reprintReceiptInfo.category || '')}${tipeBayarText}\n• Periode: ${periodeText}\n• Nominal: Rp ${(reprintReceiptInfo.nominal || 0).toLocaleString('id-ID')}\n• Tanggal: ${(reprintReceiptInfo.tanggalBayar || '')} ${(reprintReceiptInfo.jamBayar || '')}\n• Penerima: KAS ${(reprintReceiptInfo.kasPenerima || '').toUpperCase()}\n• Petugas: ${(reprintReceiptInfo.petugas || '')}\n\n*Status:* LUNAS & TERVERIFIKASI 🟢\n\nTerima kasih atas partisipasi aktif Bapak/Ibu dalam mendukung program pembangunan lingkungan RT 08 Perumahan TAS 3.\n\nSalam hangat,\n*Pengurus RT 08 Perumahan TAS 3* 🙏`;
                   
                   const url = noWaFmt
                     ? `https://api.whatsapp.com/send?phone=${noWaFmt}&text=${encodeURIComponent(textMessage)}`
