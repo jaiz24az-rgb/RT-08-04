@@ -543,7 +543,7 @@ export default function TagihanWarga({
   const [incomeKategori, setIncomeKategori] = useState<string>('Pembayaran Tambahan RT');
   const [incomeCustomKategori, setIncomeCustomKategori] = useState<string>('');
   const [incomeNominal, setIncomeNominal] = useState<string>('');
-  const [incomeKasPenerima, setIncomeKasPenerima] = useState<keyof Balance>('rtTunai');
+  const [incomeKasPenerima, setIncomeKasPenerima] = useState<keyof Balance>('rtPettyCash');
   const [incomeTanggal, setIncomeTanggal] = useState<string>(new Date().toISOString().split('T')[0]);
   const [incomeDeskripsi, setIncomeDeskripsi] = useState<string>('');
   const [incomePetugas, setIncomePetugas] = useState<string>('');
@@ -3825,7 +3825,7 @@ export default function TagihanWarga({
       });
       fields.push({
         label: 'TAMBAHAN PEMBAYARAN',
-        value: `+ Rp ${(receiptInfo as any).tambahanNominal.toLocaleString('id-ID')} (${(receiptInfo as any).tambahanKet || 'Tambahan Manual'})`,
+        value: `+ Rp ${(receiptInfo as any).tambahanNominal.toLocaleString('id-ID')} (${(receiptInfo as any).tambahanKet || 'Tambahan Manual'} ➔ Petty Cash)`,
         isHighlight: true
       });
     }
@@ -4257,8 +4257,14 @@ export default function TagihanWarga({
     const finalTambahanKet = payTambahanKet.trim() || 'Tambahan Manual';
     const totalDiterima = netNominal + finalTambahanNominal;
 
+    // Aliran Kas: Iuran Pokok RT tetap pada akun Kas Iuran (rtTunai / rtBank), Tambahan Pembayaran masuk ke Petty Cash (rtPettyCash)
     const nextKas = { ...kas };
-    nextKas[paymentTargetKas] += totalDiterima;
+    if (netNominal > 0) {
+      nextKas[paymentTargetKas] = (nextKas[paymentTargetKas] || 0) + netNominal;
+    }
+    if (finalTambahanNominal > 0) {
+      nextKas.rtPettyCash = (nextKas.rtPettyCash || 0) + finalTambahanNominal;
+    }
     updateKas(nextKas);
 
     let ledgerDesc = `${category} Bulan ${bulan} ${tahun} - ${warga.nama} (Blok ${warga.blok}-${warga.noRumah})`;
@@ -4267,23 +4273,45 @@ export default function TagihanWarga({
     } else if (finalDiskon > 0) {
       ledgerDesc += ` [DISKON Rp ${finalDiskon.toLocaleString('id-ID')} - ${alasanDiskon}]`;
     }
-    if (finalTambahanNominal > 0) {
-      ledgerDesc += ` + Tambahan: Rp ${finalTambahanNominal.toLocaleString('id-ID')} (${finalTambahanKet})`;
+
+    // 1. Catat Iuran Pokok RT tetap pada Kas Iuran RT terpilih
+    if (netNominal > 0 || isPembebasan) {
+      addLedgerEntry({
+        tanggal: paymentDate,
+        deskripsi: ledgerDesc,
+        jumlah: netNominal,
+        tipe: 'pemasukan',
+        sumberKas: paymentTargetKas,
+        kategori: category,
+        petugas: currentUser?.nama || 'Petugas RT',
+        wargaId: warga.id,
+        namaWarga: warga.nama,
+        fotoBase64: finalFotoBase64,
+        fotoNamaFile: finalFotoNamaFile,
+        fotoBase64s: finalFotoBase64s,
+        fotoNamaFiles: finalFotoNamaFiles
+      });
     }
 
-    addLedgerEntry({
-      tanggal: paymentDate,
-      deskripsi: ledgerDesc,
-      jumlah: totalDiterima,
-      tipe: 'pemasukan',
-      sumberKas: paymentTargetKas,
-      kategori: category,
-      petugas: currentUser?.nama || 'Petugas RT',
-      fotoBase64: finalFotoBase64,
-      fotoNamaFile: finalFotoNamaFile,
-      fotoBase64s: finalFotoBase64s,
-      fotoNamaFiles: finalFotoNamaFiles
-    });
+    // 2. Catat Tambahan Pembayaran masuk ke Kas Kecil (rtPettyCash)
+    if (finalTambahanNominal > 0) {
+      addLedgerEntry({
+        tanggal: paymentDate,
+        deskripsi: `Tambahan Pembayaran (${finalTambahanKet}) - ${warga.nama} (Blok ${warga.blok}-${warga.noRumah})`,
+        jumlah: finalTambahanNominal,
+        tipe: 'pemasukan',
+        sumberKas: 'rtPettyCash',
+        kategori: 'Petty Kas',
+        petugas: currentUser?.nama || 'Petugas RT',
+        wargaId: warga.id,
+        namaWarga: warga.nama,
+        isNonTagihan: true,
+        fotoBase64: finalFotoBase64,
+        fotoNamaFile: finalFotoNamaFile,
+        fotoBase64s: finalFotoBase64s,
+        fotoNamaFiles: finalFotoNamaFiles
+      });
+    }
 
     setReceiptSuccessInfo({
       id: warga.id,
@@ -4447,31 +4475,59 @@ export default function TagihanWarga({
     const finalTambahanKet = payTambahanKet.trim() || 'Tambahan Manual';
     const totalDiterima = finalNetTotal + finalTambahanNominal;
 
+    // Aliran Kas: Iuran RT Kolektif tetap pada akun Kas Iuran (rtTunai / rtBank), Tambahan Pembayaran masuk ke Petty Cash (rtPettyCash)
     const nextKas = { ...kas };
-    nextKas[paymentTargetKas] += totalDiterima;
+    if (finalNetTotal > 0) {
+      nextKas[paymentTargetKas] = (nextKas[paymentTargetKas] || 0) + finalNetTotal;
+    }
+    if (finalTambahanNominal > 0) {
+      nextKas.rtPettyCash = (nextKas.rtPettyCash || 0) + finalTambahanNominal;
+    }
     updateKas(nextKas);
 
     const itemsDescription = items.map(item => `${item.bulan} ${item.tahun}`).join(', ');
     let descSuffix = isPembebasan 
       ? ` [Bebas 100%: ${alasanDiskon}]` 
       : (finalTotalDiskon > 0 ? ` [Diskon Rp ${finalTotalDiskon.toLocaleString('id-ID')}: ${alasanDiskon}]` : '');
-    if (finalTambahanNominal > 0) {
-      descSuffix += ` + Tambahan: Rp ${finalTambahanNominal.toLocaleString('id-ID')} (${finalTambahanKet})`;
+
+    // 1. Catat Iuran RT Kolektif tetap pada Kas Iuran RT terpilih
+    if (finalNetTotal > 0 || isPembebasan) {
+      addLedgerEntry({
+        tanggal: paymentDate,
+        deskripsi: `${category} Kolektif (${itemsDescription}) - ${warga.nama} (Blok ${warga.blok}-${warga.noRumah})${descSuffix}`,
+        jumlah: finalNetTotal,
+        tipe: 'pemasukan',
+        sumberKas: paymentTargetKas,
+        kategori: category,
+        petugas: currentUser?.nama || 'Petugas RT',
+        wargaId: warga.id,
+        namaWarga: warga.nama,
+        fotoBase64: finalFotoBase64,
+        fotoNamaFile: finalFotoNamaFile,
+        fotoBase64s: finalFotoBase64s,
+        fotoNamaFiles: finalFotoNamaFiles
+      });
     }
 
-    addLedgerEntry({
-      tanggal: paymentDate,
-      deskripsi: `${category} Kolektif (${itemsDescription}) - ${warga.nama} (Blok ${warga.blok}-${warga.noRumah})${descSuffix}`,
-      jumlah: totalDiterima,
-      tipe: 'pemasukan',
-      sumberKas: paymentTargetKas,
-      kategori: category,
-      petugas: currentUser?.nama || 'Petugas RT',
-      fotoBase64: finalFotoBase64,
-      fotoNamaFile: finalFotoNamaFile,
-      fotoBase64s: finalFotoBase64s,
-      fotoNamaFiles: finalFotoNamaFiles
-    });
+    // 2. Catat Tambahan Pembayaran masuk ke Kas Kecil (rtPettyCash)
+    if (finalTambahanNominal > 0) {
+      addLedgerEntry({
+        tanggal: paymentDate,
+        deskripsi: `Tambahan Pembayaran (${finalTambahanKet}) - ${warga.nama} (Blok ${warga.blok}-${warga.noRumah})`,
+        jumlah: finalTambahanNominal,
+        tipe: 'pemasukan',
+        sumberKas: 'rtPettyCash',
+        kategori: 'Petty Kas',
+        petugas: currentUser?.nama || 'Petugas RT',
+        wargaId: warga.id,
+        namaWarga: warga.nama,
+        isNonTagihan: true,
+        fotoBase64: finalFotoBase64,
+        fotoNamaFile: finalFotoNamaFile,
+        fotoBase64s: finalFotoBase64s,
+        fotoNamaFiles: finalFotoNamaFiles
+      });
+    }
 
     setReceiptSuccessInfo({
       id: warga.id,
@@ -8560,7 +8616,7 @@ export default function TagihanWarga({
                     />
                     <label htmlFor="enable-pay-tambahan" className="text-xs font-extrabold text-amber-950 cursor-pointer flex items-center gap-1.5 select-none">
                       <PlusCircle className="w-3.5 h-3.5 text-amber-600" />
-                      + Tambahan Pembayaran Lain (Manual - 1 Notifikasi Saja)
+                      + Tambahan Pembayaran Lain (Masuk Kas Kecil / Petty Cash - 1 Notifikasi Saja)
                     </label>
                   </div>
                   {payHasTambahan && payTambahanNominal > 0 && (
@@ -8599,17 +8655,23 @@ export default function TagihanWarga({
                     </div>
                     <div className="bg-amber-100/70 rounded-xl p-2.5 text-xs space-y-1 font-mono border border-amber-200">
                       <div className="flex justify-between text-slate-600">
-                        <span>Iuran Pokok RT:</span>
+                        <span>Iuran Pokok RT (Masuk Kas Iuran):</span>
                         <span>Rp {(payDiskonType === 'pembebasan' ? 0 : Math.max(0, payingInfo.nominal - (payHasDiskon ? payDiskonNominal : 0))).toLocaleString('id-ID')}</span>
                       </div>
                       <div className="flex justify-between text-amber-900 font-bold">
-                        <span>+ Tambahan Lain:</span>
+                        <span>+ Tambahan Lain (Masuk Petty Cash RT):</span>
                         <span>+ Rp {(payTambahanNominal || 0).toLocaleString('id-ID')}</span>
                       </div>
                       <div className="flex justify-between font-extrabold text-emerald-800 text-sm border-t border-amber-300/80 pt-1">
-                        <span>Total Diterima:</span>
+                        <span>Total Diterima dari Warga:</span>
                         <span>Rp {((payDiskonType === 'pembebasan' ? 0 : Math.max(0, payingInfo.nominal - (payHasDiskon ? payDiskonNominal : 0))) + (payTambahanNominal || 0)).toLocaleString('id-ID')}</span>
                       </div>
+                    </div>
+                    <div className="text-[11px] text-amber-950 bg-amber-100/90 rounded-xl p-2.5 border border-amber-300/80 flex items-start gap-2 font-sans">
+                      <span className="text-amber-700 text-sm leading-none mt-0.5">💡</span>
+                      <span className="leading-snug">
+                        <strong>Aliran Kas Otomatis:</strong> Pokok Iuran RT tetap masuk ke akun <strong>{paymentTargetKas === 'rtBank' ? 'Kas Iuran RT Bank' : 'Kas Iuran RT Tunai'}</strong>, sedangkan Tambahan Pembayaran dialirkan ke <strong>Kas Kecil (Petty Cash RT)</strong>. Warga tetap memperoleh 1 kuitansi & notifikasi WhatsApp gabungan.
+                      </span>
                     </div>
                   </div>
                 )}
@@ -8807,7 +8869,7 @@ export default function TagihanWarga({
                     />
                     <label htmlFor="enable-batch-pay-tambahan" className="text-xs font-extrabold text-amber-950 cursor-pointer flex items-center gap-1.5 select-none">
                       <PlusCircle className="w-3.5 h-3.5 text-amber-600" />
-                      + Tambahan Pembayaran Lain (Manual - 1 Notifikasi Saja)
+                      + Tambahan Pembayaran Lain (Masuk Kas Kecil / Petty Cash - 1 Notifikasi Saja)
                     </label>
                   </div>
                   {payHasTambahan && payTambahanNominal > 0 && (
@@ -8846,17 +8908,23 @@ export default function TagihanWarga({
                     </div>
                     <div className="bg-amber-100/70 rounded-xl p-2.5 text-xs space-y-1 font-mono border border-amber-200">
                       <div className="flex justify-between text-slate-600">
-                        <span>Iuran Pokok Kolektif:</span>
+                        <span>Iuran Pokok Kolektif (Masuk Kas Iuran):</span>
                         <span>Rp {payingBatchInfo.totalNominal.toLocaleString('id-ID')}</span>
                       </div>
                       <div className="flex justify-between text-amber-900 font-bold">
-                        <span>+ Tambahan Lain:</span>
+                        <span>+ Tambahan Lain (Masuk Petty Cash RT):</span>
                         <span>+ Rp {(payTambahanNominal || 0).toLocaleString('id-ID')}</span>
                       </div>
                       <div className="flex justify-between font-extrabold text-emerald-800 text-sm border-t border-amber-300/80 pt-1">
-                        <span>Total Diterima:</span>
+                        <span>Total Diterima dari Warga:</span>
                         <span>Rp {(payingBatchInfo.totalNominal + (payTambahanNominal || 0)).toLocaleString('id-ID')}</span>
                       </div>
+                    </div>
+                    <div className="text-[11px] text-amber-950 bg-amber-100/90 rounded-xl p-2.5 border border-amber-300/80 flex items-start gap-2 font-sans">
+                      <span className="text-amber-700 text-sm leading-none mt-0.5">💡</span>
+                      <span className="leading-snug">
+                        <strong>Aliran Kas Otomatis:</strong> Pokok Iuran Kolektif tetap masuk ke akun <strong>{paymentTargetKas === 'rtBank' ? 'Kas Iuran RT Bank' : 'Kas Iuran RT Tunai'}</strong>, sedangkan Tambahan Pembayaran dialirkan ke <strong>Kas Kecil (Petty Cash RT)</strong>. Warga tetap memperoleh 1 kuitansi & notifikasi WhatsApp gabungan.
+                      </span>
                     </div>
                   </div>
                 )}
@@ -10063,14 +10131,16 @@ export default function TagihanWarga({
               {receiptSuccessInfo.tambahanNominal && receiptSuccessInfo.tambahanNominal > 0 && (
                 <>
                   <div className="flex justify-between items-center border-b border-slate-200/60 pb-1.5">
-                    <span className="text-slate-455 font-bold uppercase tracking-wider font-mono">Iuran Pokok RT</span>
+                    <span className="text-slate-455 font-bold uppercase tracking-wider font-mono">
+                      Iuran Pokok RT ({receiptSuccessInfo.kasPenerima.toUpperCase()})
+                    </span>
                     <span className="font-bold text-slate-800 font-mono">
                       Rp {(receiptSuccessInfo.pokokNominal || (receiptSuccessInfo.nominal - receiptSuccessInfo.tambahanNominal)).toLocaleString('id-ID')}
                     </span>
                   </div>
                   <div className="flex justify-between items-center border-b border-slate-200/60 pb-1.5 text-amber-900">
                     <span className="font-bold uppercase tracking-wider font-mono">
-                      Tambahan ({receiptSuccessInfo.tambahanKet || 'Lainnya'})
+                      Tambahan ({receiptSuccessInfo.tambahanKet || 'Lainnya'}) ➔ Kas Kecil (Petty Cash)
                     </span>
                     <span className="font-bold font-mono">
                       + Rp {receiptSuccessInfo.tambahanNominal.toLocaleString('id-ID')}
@@ -10158,7 +10228,7 @@ export default function TagihanWarga({
                   }
 
                   const rincianTambahanText = (receiptSuccessInfo.tambahanNominal && receiptSuccessInfo.tambahanNominal > 0)
-                    ? `\n• Rincian Penerimaan:\n  - Iuran RT: Rp ${(receiptSuccessInfo.pokokNominal || (receiptSuccessInfo.nominal - receiptSuccessInfo.tambahanNominal)).toLocaleString('id-ID')}\n  - Tambahan (${receiptSuccessInfo.tambahanKet || 'Lainnya'}): + Rp ${receiptSuccessInfo.tambahanNominal.toLocaleString('id-ID')}`
+                    ? `\n• Rincian Penerimaan:\n  - Iuran RT (${receiptSuccessInfo.kasPenerima === 'rtBank' ? 'Kas Bank RT' : 'Kas Tunai RT'}): Rp ${(receiptSuccessInfo.pokokNominal || (receiptSuccessInfo.nominal - receiptSuccessInfo.tambahanNominal)).toLocaleString('id-ID')}\n  - Tambahan (${receiptSuccessInfo.tambahanKet || 'Lainnya'} ➔ Kas Kecil/Petty Cash): + Rp ${receiptSuccessInfo.tambahanNominal.toLocaleString('id-ID')}`
                     : '';
 
                   const textMessage = isNonTagihan
@@ -10203,7 +10273,7 @@ export default function TagihanWarga({
                   }
 
                   const rincianTambahanText = (receiptSuccessInfo.tambahanNominal && receiptSuccessInfo.tambahanNominal > 0)
-                    ? `\n• Rincian Penerimaan:\n  - Iuran RT: Rp ${(receiptSuccessInfo.pokokNominal || (receiptSuccessInfo.nominal - receiptSuccessInfo.tambahanNominal)).toLocaleString('id-ID')}\n  - Tambahan (${receiptSuccessInfo.tambahanKet || 'Lainnya'}): + Rp ${receiptSuccessInfo.tambahanNominal.toLocaleString('id-ID')}`
+                    ? `\n• Rincian Penerimaan:\n  - Iuran RT (${receiptSuccessInfo.kasPenerima === 'rtBank' ? 'Kas Bank RT' : 'Kas Tunai RT'}): Rp ${(receiptSuccessInfo.pokokNominal || (receiptSuccessInfo.nominal - receiptSuccessInfo.tambahanNominal)).toLocaleString('id-ID')}\n  - Tambahan (${receiptSuccessInfo.tambahanKet || 'Lainnya'} ➔ Kas Kecil/Petty Cash): + Rp ${receiptSuccessInfo.tambahanNominal.toLocaleString('id-ID')}`
                     : '';
 
                   const textMessage = isNonTagihan

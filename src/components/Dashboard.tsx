@@ -21,7 +21,9 @@ import {
   Receipt,
   Camera,
   Trash2,
-  Cloud
+  Cloud,
+  User,
+  Search
 } from 'lucide-react';
 
 interface DashboardProps {
@@ -121,8 +123,35 @@ export default function Dashboard({
     kategori: 'Petty Kas',
     petugas: '',
     fotoBase64: '',
-    fotoNamaFile: ''
+    fotoNamaFile: '',
+    wargaId: '',
+    namaWarga: '',
   });
+
+  const [wargaSearchPetty, setWargaSearchPetty] = useState('');
+  const [wargaSearchUmum, setWargaSearchUmum] = useState('');
+
+  const filteredWargaForPetty = React.useMemo(() => {
+    if (!wargaList) return [];
+    const q = wargaSearchPetty.toLowerCase().trim();
+    if (!q) return wargaList;
+    return wargaList.filter(w => 
+      (w.nama && w.nama.toLowerCase().includes(q)) ||
+      (w.blok && w.blok.toLowerCase().includes(q)) ||
+      (w.noRumah && w.noRumah.toLowerCase().includes(q))
+    );
+  }, [wargaList, wargaSearchPetty]);
+
+  const filteredWargaForUmum = React.useMemo(() => {
+    if (!wargaList) return [];
+    const q = wargaSearchUmum.toLowerCase().trim();
+    if (!q) return wargaList;
+    return wargaList.filter(w => 
+      (w.nama && w.nama.toLowerCase().includes(q)) ||
+      (w.blok && w.blok.toLowerCase().includes(q)) ||
+      (w.noRumah && w.noRumah.toLowerCase().includes(q))
+    );
+  }, [wargaList, wargaSearchUmum]);
 
   // Image Cropper States & Helpers
   const [cropperOpen, setCropperOpen] = useState(false);
@@ -214,7 +243,9 @@ export default function Dashboard({
         kategori: newTx.kategori || 'Petty Kas',
         petugas: newTx.petugas || 'Pemegang Kas Kecil',
         fotoBase64: newTx.fotoBase64 || undefined,
-        fotoNamaFile: newTx.fotoNamaFile || undefined
+        fotoNamaFile: newTx.fotoNamaFile || undefined,
+        wargaId: newTx.wargaId || undefined,
+        namaWarga: newTx.namaWarga || undefined
       });
 
       const updatedBalance = { ...kas };
@@ -235,8 +266,11 @@ export default function Dashboard({
         kategori: 'Petty Kas',
         petugas: '',
         fotoBase64: '',
-        fotoNamaFile: ''
+        fotoNamaFile: '',
+        wargaId: '',
+        namaWarga: ''
       });
+      setWargaSearchPetty('');
       setShowQuickTx(false);
 
     } else if (activeTab === 'tagihan') {
@@ -323,7 +357,9 @@ export default function Dashboard({
         kategori: newTx.kategori || 'Kas Umum RT',
         petugas: newTx.petugas || 'Bendahara RT',
         fotoBase64: newTx.fotoBase64 || undefined,
-        fotoNamaFile: newTx.fotoNamaFile || undefined
+        fotoNamaFile: newTx.fotoNamaFile || undefined,
+        wargaId: newTx.wargaId || undefined,
+        namaWarga: newTx.namaWarga || undefined
       });
 
       const updatedBalance = { ...kas };
@@ -344,8 +380,11 @@ export default function Dashboard({
         kategori: 'Petty Kas',
         petugas: '',
         fotoBase64: '',
-        fotoNamaFile: ''
+        fotoNamaFile: '',
+        wargaId: '',
+        namaWarga: ''
       });
+      setWargaSearchUmum('');
       setShowQuickTx(false);
 
     } else if (activeTab === 'bank') {
@@ -898,6 +937,83 @@ export default function Dashboard({
                     />
                   </div>
 
+                  {/* Pilihan Nama Warga (Opsional / Jika Diperlukan) */}
+                  <div className="md:col-span-2 bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-2.5">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                      <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5 font-sans">
+                        <User className="w-3.5 h-3.5 text-sky-600" />
+                        <span>Pilihan Nama Warga (Opsional / Jika Diperlukan)</span>
+                      </label>
+                      <span className="text-[10px] text-slate-500 font-mono">
+                        Kas Penerimaan / Pengeluaran Terkait Warga
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 leading-relaxed font-sans">
+                      Pilih nama warga jika transaksi ini ditujukan atau bersumber dari warga tertentu (contoh: bantuan sosial/duka, santunan, donasi warga, upah kerja bakti warga, pembelian dari warga, dll).
+                    </p>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 pt-0.5">
+                      <div className="sm:col-span-4 relative">
+                        <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                        <input
+                          type="text"
+                          placeholder="Cari nama / blok warga..."
+                          value={wargaSearchPetty}
+                          onChange={(e) => setWargaSearchPetty(e.target.value)}
+                          className="w-full bg-white border border-slate-200 rounded-xl pl-8 pr-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-sky-500 font-sans"
+                        />
+                      </div>
+                      <div className="sm:col-span-8">
+                        <select
+                          value={newTx.wargaId || ''}
+                          onChange={(e) => {
+                            const selId = e.target.value;
+                            const found = (wargaList || []).find(w => w.id === selId);
+                            if (found) {
+                              setNewTx(prev => ({
+                                ...prev,
+                                wargaId: found.id,
+                                namaWarga: found.nama,
+                                deskripsi: prev.deskripsi ? prev.deskripsi : `${prev.tipe === 'pemasukan' ? 'Penerimaan' : 'Pengeluaran'} RT - ${found.nama} (Blok ${found.blok}-${found.noRumah})`
+                              }));
+                            } else {
+                              setNewTx(prev => ({ ...prev, wargaId: '', namaWarga: '' }));
+                            }
+                          }}
+                          className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500 font-sans font-medium"
+                        >
+                          <option value="">-- Tanpa Warga Tertentu (Umum / Fasum / Eksternal) --</option>
+                          {filteredWargaForPetty.map(w => (
+                            <option key={w.id} value={w.id}>
+                              {w.nama} (Blok {w.blok}-{w.noRumah})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    {newTx.wargaId && (
+                      <div className="flex items-center justify-between bg-sky-50 border border-sky-200 text-sky-850 px-3 py-2 rounded-xl text-xs">
+                        <div className="flex items-center gap-2">
+                          <User className="w-3.5 h-3.5 text-sky-600 shrink-0" />
+                          <span>
+                            Warga Terpilih: <strong>{newTx.namaWarga}</strong> {(() => {
+                              const w = (wargaList || []).find(item => item.id === newTx.wargaId);
+                              return w ? `(Blok ${w.blok}-${w.noRumah})` : '';
+                            })()}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setNewTx(prev => ({ ...prev, wargaId: '', namaWarga: '' }))}
+                          className="text-[10px] text-rose-600 hover:text-rose-800 font-bold underline cursor-pointer"
+                        >
+                          ✕ Lepas Warga
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
                   <div className="md:col-span-2 bg-slate-50 border border-dashed border-slate-250 rounded-2xl p-4 flex flex-col items-center justify-center gap-2">
                     <label className="block text-xs font-bold text-slate-700 font-mono mb-1 text-center w-full">Foto Nota / Bukti Transaksi Kas Kecil</label>
                     {newTx.fotoBase64 ? (
@@ -1261,6 +1377,83 @@ export default function Dashboard({
                       onChange={e => setNewTx({ ...newTx, petugas: e.target.value })}
                       className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
                     />
+                  </div>
+
+                  {/* Pilihan Nama Warga (Opsional / Jika Diperlukan) */}
+                  <div className="md:col-span-2 bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-2.5">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                      <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5 font-sans">
+                        <User className="w-3.5 h-3.5 text-sky-600" />
+                        <span>Pilihan Nama Warga (Opsional / Jika Diperlukan)</span>
+                      </label>
+                      <span className="text-[10px] text-slate-500 font-mono">
+                        Kas Penerimaan / Pengeluaran Terkait Warga
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 leading-relaxed font-sans">
+                      Pilih nama warga jika transaksi ini ditujukan atau bersumber dari warga tertentu (contoh: bantuan sosial/duka, santunan, donasi warga, upah kerja bakti warga, pembelian dari warga, dll).
+                    </p>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 pt-0.5">
+                      <div className="sm:col-span-4 relative">
+                        <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                        <input
+                          type="text"
+                          placeholder="Cari nama / blok warga..."
+                          value={wargaSearchUmum}
+                          onChange={(e) => setWargaSearchUmum(e.target.value)}
+                          className="w-full bg-white border border-slate-200 rounded-xl pl-8 pr-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-sky-500 font-sans"
+                        />
+                      </div>
+                      <div className="sm:col-span-8">
+                        <select
+                          value={newTx.wargaId || ''}
+                          onChange={(e) => {
+                            const selId = e.target.value;
+                            const found = (wargaList || []).find(w => w.id === selId);
+                            if (found) {
+                              setNewTx(prev => ({
+                                ...prev,
+                                wargaId: found.id,
+                                namaWarga: found.nama,
+                                deskripsi: prev.deskripsi ? prev.deskripsi : `${prev.tipe === 'pemasukan' ? 'Penerimaan' : 'Pengeluaran'} RT - ${found.nama} (Blok ${found.blok}-${found.noRumah})`
+                              }));
+                            } else {
+                              setNewTx(prev => ({ ...prev, wargaId: '', namaWarga: '' }));
+                            }
+                          }}
+                          className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500 font-sans font-medium"
+                        >
+                          <option value="">-- Tanpa Warga Tertentu (Umum / Fasum / Eksternal) --</option>
+                          {filteredWargaForUmum.map(w => (
+                            <option key={w.id} value={w.id}>
+                              {w.nama} (Blok {w.blok}-{w.noRumah})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    {newTx.wargaId && (
+                      <div className="flex items-center justify-between bg-sky-50 border border-sky-200 text-sky-850 px-3 py-2 rounded-xl text-xs">
+                        <div className="flex items-center gap-2">
+                          <User className="w-3.5 h-3.5 text-sky-600 shrink-0" />
+                          <span>
+                            Warga Terpilih: <strong>{newTx.namaWarga}</strong> {(() => {
+                              const w = (wargaList || []).find(item => item.id === newTx.wargaId);
+                              return w ? `(Blok ${w.blok}-${w.noRumah})` : '';
+                            })()}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setNewTx(prev => ({ ...prev, wargaId: '', namaWarga: '' }))}
+                          className="text-[10px] text-rose-600 hover:text-rose-800 font-bold underline cursor-pointer"
+                        >
+                          ✕ Lepas Warga
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   <div className="md:col-span-2 bg-slate-50 border border-dashed border-slate-250 rounded-2xl p-4 flex flex-col items-center justify-center gap-2">

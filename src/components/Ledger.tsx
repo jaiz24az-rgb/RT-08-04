@@ -847,6 +847,18 @@ export default function Ledger({
   } | null>(null);
   const [editingLedgerEntry, setEditingLedgerEntry] = useState<LedgerEntry | null>(null);
   const [isAmountLocked, setIsAmountLocked] = useState<boolean>(true);
+  const [editWargaSearch, setEditWargaSearch] = useState('');
+
+  const filteredEditWargaList = React.useMemo(() => {
+    if (!wargaList) return [];
+    const q = editWargaSearch.toLowerCase().trim();
+    if (!q) return wargaList;
+    return wargaList.filter(w => 
+      (w.nama && w.nama.toLowerCase().includes(q)) ||
+      (w.blok && w.blok.toLowerCase().includes(q)) ||
+      (w.noRumah && w.noRumah.toLowerCase().includes(q))
+    );
+  }, [wargaList, editWargaSearch]);
 
   React.useEffect(() => {
     if (!editingLedgerEntry) {
@@ -1093,7 +1105,9 @@ export default function Ledger({
           petugas: editingLedgerEntry.petugas,
           sumberKas: editingLedgerEntry.sumberKas,
           jumlah: editingLedgerEntry.jumlah,
-          tipe: editingLedgerEntry.tipe
+          tipe: editingLedgerEntry.tipe,
+          wargaId: editingLedgerEntry.wargaId || undefined,
+          namaWarga: editingLedgerEntry.namaWarga || undefined
         };
       }
       return item;
@@ -1101,6 +1115,7 @@ export default function Ledger({
 
     setLedger(updatedLedger);
     setEditingLedgerEntry(null);
+    setEditWargaSearch('');
   };
 
   // Use processedLedger directly since running balances are already pre-computed on the full list
@@ -2373,8 +2388,22 @@ export default function Ledger({
                           <td className={`border-r border-slate-300 p-2 font-mono text-center text-[9px] ${codeColorClass}`}>
                             {row.noBukti}
                           </td>
-                          <td className={`border-r border-slate-300 p-2 max-w-xs truncate ${descColorClass}`} title={row.deskripsi}>
-                            {row.deskripsi}
+                          <td className={`border-r border-slate-300 p-2 max-w-xs ${descColorClass}`} title={row.deskripsi}>
+                            <div className="truncate">{row.deskripsi}</div>
+                            {(() => {
+                              const linkedWarga = row.wargaId ? (wargaList || []).find(w => w.id === row.wargaId) : null;
+                              const displayName = linkedWarga ? linkedWarga.nama : row.namaWarga;
+                              if (displayName) {
+                                return (
+                                  <div className="text-[9px] text-sky-700 font-semibold flex items-center gap-1 mt-0.5">
+                                    <span className="bg-sky-50 border border-sky-200 px-1 py-0.2 rounded inline-flex items-center gap-0.5 font-sans">
+                                      👤 {displayName} {linkedWarga ? `(${linkedWarga.blok}-${linkedWarga.noRumah})` : ''}
+                                    </span>
+                                  </div>
+                                );
+                              }
+                              return null;
+                            })()}
                           </td>
                           <td className="border-r border-slate-300 p-2 text-slate-600 font-semibold capitalize truncate max-w-[80px]" title={row.petugas}>
                             {row.petugas}
@@ -2602,6 +2631,20 @@ export default function Ledger({
                       <div className="space-y-1">
                         <h4 className="font-extrabold text-slate-900 text-sm md:text-base leading-snug flex items-center flex-wrap gap-2">
                           <span>{entry.deskripsi}</span>
+                          {(() => {
+                            const linkedWarga = entry.wargaId ? (wargaList || []).find(w => w.id === entry.wargaId) : null;
+                            const displayName = linkedWarga ? linkedWarga.nama : entry.namaWarga;
+                            const displayBlok = linkedWarga ? `(Blok ${linkedWarga.blok}-${linkedWarga.noRumah})` : '';
+                            if (displayName) {
+                              return (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-sky-50 text-sky-750 border border-sky-200">
+                                  <User className="w-3 h-3 text-sky-600 pointer-events-none" />
+                                  <span>Warga: {displayName} {displayBlok}</span>
+                                </span>
+                              );
+                            }
+                            return null;
+                          })()}
                           {entry.fotoBase64 && allowedPhotos && (
                             <button
                               type="button"
@@ -3584,6 +3627,82 @@ export default function Ledger({
                   <option value="rombongTunai">Rombong Tunai (rombongTunai)</option>
                   <option value="rombongBank">Rombong Bank (rombongBank)</option>
                 </select>
+              </div>
+
+              {/* Pilihan Nama Warga Terkait */}
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5 font-sans">
+                    <User className="w-3.5 h-3.5 text-sky-600" />
+                    <span>Pilihan Nama Warga Terkait (Opsional / Jika Diperlukan)</span>
+                  </label>
+                  {editingLedgerEntry.wargaId && (
+                    <button
+                      type="button"
+                      onClick={() => setEditingLedgerEntry({ ...editingLedgerEntry, wargaId: undefined, namaWarga: undefined })}
+                      className="text-[10px] font-bold text-rose-600 hover:text-rose-800 underline cursor-pointer"
+                    >
+                      ✕ Lepas Warga
+                    </button>
+                  )}
+                </div>
+                <p className="text-[11px] text-slate-500 font-sans">
+                  Hubungkan atau perbaiki data warga pembayar/penerima kas untuk mutasi penerimaan maupun pengeluaran RT ini.
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 pt-0.5">
+                  <div className="sm:col-span-5 relative">
+                    <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                    <input
+                      type="text"
+                      placeholder="Filter nama / blok..."
+                      value={editWargaSearch}
+                      onChange={(e) => setEditWargaSearch(e.target.value)}
+                      className="w-full bg-white border border-slate-200 rounded-xl pl-8 pr-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-sky-500 font-sans"
+                    />
+                  </div>
+                  <div className="sm:col-span-7">
+                    <select
+                      value={editingLedgerEntry.wargaId || ''}
+                      onChange={(e) => {
+                        const selId = e.target.value;
+                        const found = (wargaList || []).find(w => w.id === selId);
+                        if (found) {
+                          setEditingLedgerEntry({
+                            ...editingLedgerEntry,
+                            wargaId: found.id,
+                            namaWarga: found.nama
+                          });
+                        } else {
+                          setEditingLedgerEntry({
+                            ...editingLedgerEntry,
+                            wargaId: undefined,
+                            namaWarga: undefined
+                          });
+                        }
+                      }}
+                      className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500 font-sans font-medium"
+                    >
+                      <option value="">-- Tanpa Warga Tertentu (Umum) --</option>
+                      {filteredEditWargaList.map(w => (
+                        <option key={w.id} value={w.id}>
+                          {w.nama} (Blok {w.blok}-{w.noRumah})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                {editingLedgerEntry.wargaId && (
+                  <div className="text-[11px] text-sky-850 bg-sky-50 border border-sky-200 px-3 py-1.5 rounded-xl font-medium flex items-center gap-1.5">
+                    <Check className="w-3.5 h-3.5 text-sky-600 shrink-0" />
+                    <span>
+                      Terhubung ke: <strong>{editingLedgerEntry.namaWarga || (wargaList || []).find(w => w.id === editingLedgerEntry.wargaId)?.nama}</strong>
+                      {(() => {
+                        const w = (wargaList || []).find(item => item.id === editingLedgerEntry.wargaId);
+                        return w ? ` (Blok ${w.blok}-${w.noRumah})` : '';
+                      })()}
+                    </span>
+                  </div>
+                )}
               </div>
 
               <div>
