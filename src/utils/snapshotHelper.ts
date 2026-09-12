@@ -81,20 +81,52 @@ export function getStoredSnapshots(): SnapshotItem[] {
  * Safely save snapshots to localStorage with automatic pruning if quota exceeded
  */
 export function saveStoredSnapshots(snapshots: SnapshotItem[]): boolean {
-  try {
-    const limited = snapshots.slice(0, 20);
-    localStorage.setItem('perumtas_rt08_snapshots', JSON.stringify(limited));
-    return true;
-  } catch (e) {
-    console.warn('Penyimpanan snapshots penuh, memangkas slot menjadi 10:', e);
+  // Use a reasonable limit (e.g. 10 snapshots) to prevent exceeding browser 5MB quota
+  const counts = [10, 6, 3, 1];
+  for (const count of counts) {
     try {
-      const pruned = snapshots.slice(0, 10);
-      localStorage.setItem('perumtas_rt08_snapshots', JSON.stringify(pruned));
+      const limited = snapshots.slice(0, count);
+      localStorage.setItem('perumtas_rt08_snapshots', JSON.stringify(limited));
       return true;
-    } catch (e2) {
-      console.warn('Gagal menyimpan snapshots bahkan setelah dipangkas:', e2);
-      return false;
+    } catch (e) {
+      console.warn(`Penyimpanan snapshots penuh di slot ${count}, mencoba slot lebih ringkas...`, e);
     }
+  }
+  return false;
+}
+
+/**
+ * Helper to download an individual snapshot item as a physical JSON file
+ */
+export function downloadSnapshotAsJSON(snap: SnapshotItem) {
+  try {
+    const payload = {
+      rt08_backup_ver: "1.0",
+      timestamp: snap.timestamp,
+      dateString: snap.dateString,
+      label: snap.label,
+      kas: snap.kas,
+      ledger: snap.ledger,
+      wargaList: snap.wargaList,
+      rombongList: snap.rombongList,
+    };
+
+    const jsonString = `data:text/json;charset=utf-8,${encodeURIComponent(
+      JSON.stringify(payload, null, 2)
+    )}`;
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.setAttribute("href", jsonString);
+    const safeLabel = (snap.label || 'snapshot').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 30);
+    downloadAnchor.setAttribute(
+      "download",
+      `BACKUP_RT08_${safeLabel}_${snap.dateString.replace(/[^a-zA-Z0-9]/g, '_')}.json`
+    );
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+  } catch (err) {
+    console.error('Gagal mengunduh file snapshot:', err);
+    alert('Gagal mengunduh file cadangan: ' + String(err));
   }
 }
 

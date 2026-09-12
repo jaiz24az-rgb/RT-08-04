@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { safeStorage as localStorage } from '../utils/safeStorage';
-import { getStoredSnapshots, saveStoredSnapshots, createSnapshotItem } from '../utils/snapshotHelper';
+import { getStoredSnapshots, saveStoredSnapshots, createSnapshotItem, downloadSnapshotAsJSON } from '../utils/snapshotHelper';
 import { 
   Mail, 
   Send, 
@@ -351,7 +351,7 @@ export default function Undangan({
         console.warn('Gagal memuat snaps:', e);
       }
     }
-  }, [showSettingsModal, kas, ledger, wargaList, rombongList]);
+  }, [showSettingsModal, wargaList.length, ledger.length]);
 
   const [showAddRombongModal, setShowAddRombongModal] = useState(false);
   const [newRombong, setNewRombong] = useState({
@@ -517,7 +517,8 @@ export default function Undangan({
         'export',
         { kas, ledger, wargaList, rombongList }
       );
-      const updated = [exportSnap, ...snapshots.filter(s => s.id !== exportSnap.id)].slice(0, 20);
+      const existing = getStoredSnapshots();
+      const updated = [exportSnap, ...existing.filter(s => s.id !== exportSnap.id)].slice(0, 10);
       setSnapshots(updated);
       saveStoredSnapshots(updated);
 
@@ -4550,6 +4551,15 @@ _Pesan Whatsapp ini dikirim secara resmi melalui Sistem Informasi Administrasi R
                           </div>
 
                           <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => downloadSnapshotAsJSON(snap)}
+                              className="bg-slate-100 hover:bg-slate-200 border border-slate-250 text-slate-750 font-extrabold px-2 py-1.5 rounded-lg text-[10px] cursor-pointer transition active:scale-95 font-sans flex items-center gap-1"
+                              title="Unduh Berkas JSON dari Titik Ini"
+                            >
+                              <Download className="w-3 h-3 text-slate-600" />
+                              <span>Unduh</span>
+                            </button>
                             <button
                               type="button"
                               onClick={() => handleRestoreSpecific(snap)}

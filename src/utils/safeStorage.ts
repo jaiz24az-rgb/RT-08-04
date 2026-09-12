@@ -19,7 +19,8 @@ export const safeStorage = {
   getItem(key: string): string | null {
     if (isLocalStorageAvailable) {
       try {
-        return window.localStorage.getItem(key);
+        const val = window.localStorage.getItem(key);
+        if (val !== null) return val;
       } catch (e) {
         // Fallback
       }
@@ -31,9 +32,8 @@ export const safeStorage = {
     if (isLocalStorageAvailable) {
       try {
         window.localStorage.setItem(key, value);
-        return;
       } catch (e) {
-        // Fallback
+        console.warn(`localStorage.setItem failed for key "${key}", saving to inMemoryStorage:`, e);
       }
     }
     inMemoryStorage[key] = String(value);
@@ -43,7 +43,6 @@ export const safeStorage = {
     if (isLocalStorageAvailable) {
       try {
         window.localStorage.removeItem(key);
-        return;
       } catch (e) {
         // Fallback
       }

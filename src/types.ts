@@ -26,6 +26,8 @@ export interface LedgerEntry {
   approvedByAdmin?: boolean; // Approved by admin
   needApproval?: boolean; // Needs admin approval to count
   rombongId?: string; // Links to rombong
+  wargaId?: string; // Links to warga (for hibah, sumbangan, additional payments)
+  isNonTagihan?: boolean; // Flag for non-tagihan resident income
   bulan?: string; // Links to billing month
   tahun?: number; // Links to billing year
 }

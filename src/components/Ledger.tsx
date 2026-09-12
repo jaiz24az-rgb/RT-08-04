@@ -233,10 +233,13 @@ export default function Ledger({
     ctx.fillText('Perumtas 3 Wonoayu Sidoarjo • Desa Popoh • Jawa Timur', 100, 80);
 
     // KUITANSI title right aligned
+    const isNonTagihan = (receiptInfo as any).isNonTagihan || (
+      receiptInfo.category !== 'Iuran RT' && receiptInfo.category !== 'Iuran Rombong'
+    );
     ctx.textAlign = 'right';
     ctx.fillStyle = '#0f172a';
     ctx.font = '900 22px "Helvetica Neue", Arial, sans-serif';
-    ctx.fillText('KUITANSI', 750, 55);
+    ctx.fillText(isNonTagihan ? 'TANDA TERIMA' : 'BUKTI PENERIMAAN RT', 750, 55);
 
     // Receipt No
     const detailLoc = receiptInfo.tipe === 'warga'
@@ -278,10 +281,10 @@ export default function Ledger({
     const fields = [
       { label: 'TELAH DITERIMA DARI', value: formattedNama, isHighlight: true },
       { label: receiptInfo.tipe === 'warga' ? 'UNIT RUMAH' : 'NO LAPAK', value: detailLoc },
-      { label: 'KATEGORI PEMBAYARAN', value: receiptInfo.category || '' },
-      { label: 'PERIODE / BULAN', value: periodeValue },
+      { label: isNonTagihan ? 'KATEGORI PENERIMAAN' : 'KATEGORI PEMBAYARAN', value: receiptInfo.category || '' },
+      { label: isNonTagihan ? 'TANGGAL PENERIMAAN' : 'PERIODE / BULAN', value: isNonTagihan ? (receiptInfo.tanggalBayar || periodeValue) : periodeValue },
       { label: 'TERBILANG (UANG)', value: getTerbilang(receiptInfo.nominal) + ' Rupiah', isItalic: true },
-      { label: 'CATATAN / LAMPIRAN', value: receiptInfo.catatan || '-' }
+      { label: isNonTagihan ? 'KEPERLUAN / KETERANGAN' : 'CATATAN / LAMPIRAN', value: receiptInfo.catatan || '-' }
     ];
 
     fields.forEach(field => {
@@ -668,8 +671,9 @@ export default function Ledger({
     let detailTipe: 'warga' | 'rombong' = 'warga';
     let detailCategory = entry.kategori || 'Pemasukan Kas';
 
-    // 1. Check if description matches any registered citizen (wargaList)
-    const matchedWarga = (wargaList || []).find(w => {
+    // 1. Check if entry.wargaId exists or description matches any registered citizen (wargaList)
+    const matchedWargaById = entry.wargaId ? (wargaList || []).find(w => w.id === entry.wargaId) : null;
+    const matchedWarga = matchedWargaById || (wargaList || []).find(w => {
       if (!w || !w.nama) return false;
       const cleanWName = (w.nama || '').replace(/^(?:bp\.|bapak|ibu|bu|pak|bpk|sdr\.|sdri\.|mas|mbak|cak|ning|h\.|hj\.)\s+/i, '').trim().toLowerCase();
       if (cleanWName.length < 3) return false;
@@ -738,7 +742,8 @@ export default function Ledger({
       jamBayar: '00:00',
       kasPenerima: entry.sumberKas || '',
       petugas: entry.petugas || '',
-      catatan: entry.deskripsi || undefined
+      catatan: entry.deskripsi || undefined,
+      isNonTagihan: true
     };
   };
 
@@ -3691,17 +3696,19 @@ export default function Ledger({
                 <Check className="w-6 h-6 stroke-[3]" />
               </div>
               <h4 className="font-black text-slate-900 text-base leading-snug">
-                Bukti Pembayaran Terverifikasi!
+                {reprintReceiptInfo.isNonTagihan ? 'Bukti Tanda Terima Dana RT 08' : 'Bukti Penerimaan RT Terverifikasi!'}
               </h4>
               <p className="text-[11px] text-emerald-600 font-extrabold tracking-wide uppercase font-mono block mt-0.5">
-                Status: Lunas &amp; Terdaftar di Kas 🟢
+                {reprintReceiptInfo.isNonTagihan ? 'Status: Telah Diterima & Tercatat di Kas 🟢' : 'Status: Lunas & Terdaftar di Kas 🟢'}
               </p>
             </div>
 
             {/* Visual Rincian / Kuitansi PNG Preview */}
             {reprintReceiptPNGUrl ? (
               <div className="mb-4 border border-slate-200 rounded-2xl overflow-hidden bg-slate-50 p-2 shadow-inner">
-                <p className="text-[10px] text-slate-500 font-bold mb-1.5 text-center font-mono uppercase tracking-wider">Gambar Kuitansi Digital (PNG) 📸</p>
+                <p className="text-[10px] text-slate-500 font-bold mb-1.5 text-center font-mono uppercase tracking-wider">
+                  {reprintReceiptInfo.isNonTagihan ? 'Gambar Tanda Terima Digital (PNG) 📸' : 'Gambar Bukti Penerimaan Digital (PNG) 📸'}
+                </p>
                 <img 
                   src={reprintReceiptPNGUrl} 
                   alt="Kuitansi Digital" 
@@ -3788,15 +3795,21 @@ export default function Ledger({
               </div>
               
               <h5 className="text-xs font-black text-emerald-950 leading-snug">
-                Terima Kasih Banyak Atas Pembayaran Anda! 🙏
+                {reprintReceiptInfo.isNonTagihan ? 'Telah Diterima Dengan Baik! 🙏' : 'Terima Kasih Banyak Atas Pembayaran Anda! 🙏'}
               </h5>
               
               <p className="text-[10.5px] text-slate-650 leading-relaxed mt-2 font-medium font-sans">
-                Terima kasih atas partisipasi aktif {/^(?:bapak|ibu|pak|bu|mas|mbak|sdr|sdri)\b/i.test(reprintReceiptInfo.nama || '') ? '' : 'Bapak/Ibu '}<span className="font-extrabold text-emerald-800">{(reprintReceiptInfo.nama || '')}</span> dalam pelunasan {(reprintReceiptInfo.bulan || '').includes(',') ? 'Kolektif ' : ''}<strong className="text-slate-805 font-bold">{(reprintReceiptInfo.category || '')} ({/\b\d{4}\b/.test(reprintReceiptInfo.bulan || '') ? reprintReceiptInfo.bulan : `${reprintReceiptInfo.bulan || ''} ${reprintReceiptInfo.tahun || ''}`})</strong>.
+                {reprintReceiptInfo.isNonTagihan ? (
+                  <>Alhamdulillah, telah kami terima dana/pemasukan dari {/^(?:bapak|ibu|pak|bu|mas|mbak|sdr|sdri)\b/i.test(reprintReceiptInfo.nama || '') ? '' : 'Bapak/Ibu '}<span className="font-extrabold text-emerald-800">{(reprintReceiptInfo.nama || '')}</span> untuk <strong className="text-slate-805 font-bold">{(reprintReceiptInfo.category || 'Pemasukan Kas')}</strong> sebesar Rp {(reprintReceiptInfo.nominal || 0).toLocaleString('id-ID')}.</>
+                ) : (
+                  <>Terima kasih atas partisipasi aktif {/^(?:bapak|ibu|pak|bu|mas|mbak|sdr|sdri)\b/i.test(reprintReceiptInfo.nama || '') ? '' : 'Bapak/Ibu '}<span className="font-extrabold text-emerald-800">{(reprintReceiptInfo.nama || '')}</span> dalam pelunasan {(reprintReceiptInfo.bulan || '').includes(',') ? 'Kolektif ' : ''}<strong className="text-slate-805 font-bold">{(reprintReceiptInfo.category || '')} ({/\b\d{4}\b/.test(reprintReceiptInfo.bulan || '') ? reprintReceiptInfo.bulan : `${reprintReceiptInfo.bulan || ''} ${reprintReceiptInfo.tahun || ''}`})</strong>.</>
+                )}
               </p>
               
               <p className="text-[10px] text-slate-505 leading-relaxed mt-1.5 font-semibold italic bg-white/70 border border-slate-100 p-1.5 rounded-xl">
-                "Kontribusi nyata Bapak/Ibu adalah wujud kepedulian berharga yang menguatkan tali kekeluargaan, menjaga kehangatan paguyuban warga, serta membawa kebaikan bersama di RT 08 Perumahan TAS 3."
+                {reprintReceiptInfo.isNonTagihan 
+                  ? '"Terima kasih atas kebaikan dan partisipasi aktif Bapak/Ibu dalam mendukung kas pembangunan serta kemajuan lingkungan RT 08 Perumahan TAS 3. Semoga menjadi amal berkah bagi kita semua."'
+                  : '"Kontribusi nyata Bapak/Ibu adalah wujud kepedulian berharga yang menguatkan tali kekeluargaan, menjaga kehangatan paguyuban warga, serta membawa kebaikan bersama di RT 08 Perumahan TAS 3."'}
               </p>
               
               <div className="flex justify-center gap-1 mt-2.5">
@@ -3836,7 +3849,15 @@ export default function Ledger({
                     : `${(reprintReceiptInfo.bulan || '')} ${(reprintReceiptInfo.tahun || '')}`;
 
                   const greetingTitle = /^(?:bapak|ibu|pak|bu|mas|mbak|sdr|sdri)\b/i.test(reprintReceiptInfo.nama || '') ? '' : 'Bapak/Ibu ';
-                  const textMessage = `Assalamualaikum wr.wb.\n\n*BUKTI PEMBAYARAN IURAN RT 08* ✅\n\nHalo ${greetingTitle}*${(reprintReceiptInfo.nama || '')}*,\nTerima kasih, pembayaran Iuran Anda telah sukses kami verifikasi.\n\n*Detail Pembayaran:*\n• Nama: ${(reprintReceiptInfo.nama || '')}\n• Unit: ${detailLoc}\n• Kategori: ${(reprintReceiptInfo.category || '')}${tipeBayarText}\n• Periode: ${periodeText}\n• Nominal: Rp ${(reprintReceiptInfo.nominal || 0).toLocaleString('id-ID')}\n• Tanggal: ${(reprintReceiptInfo.tanggalBayar || '')} ${(reprintReceiptInfo.jamBayar || '')}\n• Penerima: KAS ${(reprintReceiptInfo.kasPenerima || '').toUpperCase()}\n• Petugas: ${(reprintReceiptInfo.petugas || '')}\n\n*Status:* LUNAS & TERVERIFIKASI 🟢\n\nTerima kasih atas partisipasi aktif Bapak/Ibu dalam mendukung program pembangunan lingkungan RT 08 Perumahan TAS 3.\n\nSalam hangat,\n*Pengurus RT 08 Perumahan TAS 3* 🙏`;
+
+                  const isNonTagihan = reprintReceiptInfo.isNonTagihan || (
+                    reprintReceiptInfo.category !== 'Iuran RT' && 
+                    reprintReceiptInfo.category !== 'Iuran Rombong'
+                  );
+
+                  const textMessage = isNonTagihan
+                    ? `Assalamualaikum wr.wb.\n\n*BUKTI TANDA TERIMA DANA RT 08* ✅\n\nHalo ${greetingTitle}*${(reprintReceiptInfo.nama || '')}*,\nAlhamdulillah, telah kami terima dana/pemasukan dari Bapak/Ibu dengan rincian sebagai berikut:\n\n*Detail Penerimaan:*\n• Nama: ${(reprintReceiptInfo.nama || '')}\n• Unit: ${detailLoc}\n• Kategori: ${(reprintReceiptInfo.category || 'Pemasukan Kas')}\n• Keterangan: ${(reprintReceiptInfo.catatan || '-')}\n• Total Diterima: Rp ${(reprintReceiptInfo.nominal || 0).toLocaleString('id-ID')}\n• Tanggal: ${(reprintReceiptInfo.tanggalBayar || '')} ${(reprintReceiptInfo.jamBayar && reprintReceiptInfo.jamBayar !== '00:00' ? reprintReceiptInfo.jamBayar : '')}\n• Rekening/Kas Penerima: KAS ${(reprintReceiptInfo.kasPenerima || '').toUpperCase()}\n• Petugas Penerima: ${(reprintReceiptInfo.petugas || '')}\n\n*Status:* TELAH DITERIMA & TERCATAT RESMI 🟢\n\nTerima kasih banyak atas partisipasi, kebaikan, dan kontribusi Bapak/Ibu dalam mendukung program dan kegiatan lingkungan RT 08 Perumahan TAS 3. Semoga menjadi berkah dan bermanfaat bagi seluruh warga.\n\nSalam hangat,\n*Pengurus RT 08 Perumahan TAS 3* 🙏`
+                    : `Assalamualaikum wr.wb.\n\n*BUKTI PENERIMAAN RT 08* ✅\n\nHalo ${greetingTitle}*${(reprintReceiptInfo.nama || '')}*,\nTerima kasih, penerimaan iuran dan dana RT Anda telah sukses kami verifikasi.\n\n*Detail Penerimaan:*\n• Nama: ${(reprintReceiptInfo.nama || '')}\n• Unit: ${detailLoc}\n• Kategori: ${(reprintReceiptInfo.category || '')}${tipeBayarText}\n• Periode: ${periodeText}\n• Total Diterima: Rp ${(reprintReceiptInfo.nominal || 0).toLocaleString('id-ID')}\n• Tanggal: ${(reprintReceiptInfo.tanggalBayar || '')} ${(reprintReceiptInfo.jamBayar || '')}\n• Penerima: KAS ${(reprintReceiptInfo.kasPenerima || '').toUpperCase()}\n• Petugas: ${(reprintReceiptInfo.petugas || '')}\n\n*Status:* TELAH DITERIMA & LUNAS RESMI 🟢\n\nTerima kasih atas partisipasi aktif Bapak/Ibu dalam mendukung program pembangunan lingkungan RT 08 Perumahan TAS 3.\n\nSalam hangat,\n*Pengurus RT 08 Perumahan TAS 3* 🙏`;
                   
                   const url = noWaFmt
                     ? `https://api.whatsapp.com/send?phone=${noWaFmt}&text=${encodeURIComponent(textMessage)}`

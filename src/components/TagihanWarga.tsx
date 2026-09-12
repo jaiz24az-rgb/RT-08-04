@@ -8,6 +8,7 @@ import {
   Search, 
   UserPlus, 
   User,
+  UserCheck,
   CheckCircle, 
   Clock, 
   CreditCard, 
@@ -36,6 +37,7 @@ import {
   FileSpreadsheet,
   Upload,
   Plus,
+  PlusCircle,
   Camera,
   Receipt,
   Tag,
@@ -524,7 +526,38 @@ export default function TagihanWarga({
     diskon?: number;
     isPembebasan?: boolean;
     alasanDiskon?: string;
+    isNonTagihan?: boolean;
+    pokokNominal?: number;
+    tambahanNominal?: number;
+    tambahanKet?: string;
   } | null>(null);
+
+  // States untuk Menu Plus Pemasukan Tambahan RT (Hibah / Sumbangan Warga / Pembayaran Tambahan)
+  const [showAddIncomeModal, setShowAddIncomeModal] = useState<boolean>(false);
+  const [incomeWargaId, setIncomeWargaId] = useState<string>('');
+  const [incomeIsWargaTerdaftar, setIncomeIsWargaTerdaftar] = useState<boolean>(true);
+  const [incomeManualNama, setIncomeManualNama] = useState<string>('');
+  const [incomeManualBlok, setIncomeManualBlok] = useState<string>('');
+  const [incomeManualNoRumah, setIncomeManualNoRumah] = useState<string>('');
+  const [incomeManualNoWa, setIncomeManualNoWa] = useState<string>('');
+  const [incomeKategori, setIncomeKategori] = useState<string>('Pembayaran Tambahan RT');
+  const [incomeCustomKategori, setIncomeCustomKategori] = useState<string>('');
+  const [incomeNominal, setIncomeNominal] = useState<string>('');
+  const [incomeKasPenerima, setIncomeKasPenerima] = useState<keyof Balance>('rtTunai');
+  const [incomeTanggal, setIncomeTanggal] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [incomeDeskripsi, setIncomeDeskripsi] = useState<string>('');
+  const [incomePetugas, setIncomePetugas] = useState<string>('');
+  const [incomeFotoBase64, setIncomeFotoBase64] = useState<string>('');
+  const [incomeFotoNamaFile, setIncomeFotoNamaFile] = useState<string>('');
+  const [incomeSearchWarga, setIncomeSearchWarga] = useState<string>('');
+
+  // States for Additional Manual Payment in Warga payment modals (e.g. + 50.000 for 1 unified notification)
+  const [payHasTambahan, setPayHasTambahan] = useState<boolean>(false);
+  const [payTambahanKet, setPayTambahanKet] = useState<string>('');
+  const [payTambahanNominal, setPayTambahanNominal] = useState<number>(0);
+
+  // States for Additional Manual Payment in WhatsApp Bill drawer (e.g. + 50.000 for 1 unified notification)
+  const [waCustomAdditions, setWaCustomAdditions] = useState<{ id: string; nama: string; nominal: number }[]>([]);
 
   // States for Discount & Fee Waiver in Warga & Rombong payment modals
   const [payHasDiskon, setPayHasDiskon] = useState<boolean>(false);
@@ -3732,10 +3765,13 @@ export default function TagihanWarga({
     ctx.fillText('Perumtas 3 Wonoayu Sidoarjo • Desa Popoh • Jawa Timur', 100, 80);
 
     // KUITANSI title right aligned
+    const isNonTagihan = (receiptInfo as any).isNonTagihan || (
+      receiptInfo.category !== 'Iuran RT' && receiptInfo.category !== 'Iuran Rombong'
+    );
     ctx.textAlign = 'right';
     ctx.fillStyle = '#0f172a';
     ctx.font = '900 22px "Helvetica Neue", Arial, sans-serif';
-    ctx.fillText('KUITANSI', 750, 55);
+    ctx.fillText(isNonTagihan ? 'TANDA TERIMA' : 'BUKTI PENERIMAAN RT', 750, 55);
 
     // Receipt No
     const detailLoc = receiptInfo.tipe === 'warga'
@@ -3777,9 +3813,22 @@ export default function TagihanWarga({
     const fields: { label: string; value: string; isHighlight?: boolean; isItalic?: boolean }[] = [
       { label: 'TELAH DITERIMA DARI', value: formattedNama, isHighlight: true },
       { label: receiptInfo.tipe === 'warga' ? 'UNIT RUMAH' : 'NO LAPAK', value: detailLoc },
-      { label: 'KATEGORI PEMBAYARAN', value: receiptInfo.category || '' },
-      { label: 'PERIODE / BULAN', value: periodeValue },
+      { label: isNonTagihan ? 'KATEGORI PENERIMAAN' : 'KATEGORI PENERIMAAN', value: receiptInfo.category || '' },
+      { label: isNonTagihan ? 'TANGGAL PENERIMAAN' : 'PERIODE / BULAN', value: isNonTagihan ? (receiptInfo.tanggalBayar || periodeValue) : periodeValue },
     ];
+
+    if ((receiptInfo as any).tambahanNominal && (receiptInfo as any).tambahanNominal > 0) {
+      const pokok = (receiptInfo as any).pokokNominal || (receiptInfo.nominal - (receiptInfo as any).tambahanNominal);
+      fields.push({
+        label: 'IURAN POKOK RT',
+        value: `Rp ${pokok.toLocaleString('id-ID')}`
+      });
+      fields.push({
+        label: 'TAMBAHAN PEMBAYARAN',
+        value: `+ Rp ${(receiptInfo as any).tambahanNominal.toLocaleString('id-ID')} (${(receiptInfo as any).tambahanKet || 'Tambahan Manual'})`,
+        isHighlight: true
+      });
+    }
 
     if (receiptInfo.isPembebasan) {
       fields.push({
@@ -3797,7 +3846,7 @@ export default function TagihanWarga({
 
     fields.push(
       { label: 'TERBILANG (UANG)', value: getTerbilang(receiptInfo.nominal) + ' Rupiah', isItalic: true },
-      { label: 'CATATAN / LAMPIRAN', value: receiptInfo.catatan || '-' }
+      { label: isNonTagihan ? 'KEPERLUAN / KETERANGAN' : 'CATATAN / LAMPIRAN', value: receiptInfo.catatan || '-' }
     );
 
     fields.forEach(field => {
@@ -4060,6 +4109,9 @@ export default function TagihanWarga({
     setPaymentReceiptBase64('');
     setPaymentReceiptNamaFile('');
     setPaymentReceipts([]);
+    setPayHasTambahan(false);
+    setPayTambahanKet('');
+    setPayTambahanNominal(0);
 
     if (warga.isBebasIuranPermanen) {
       setPayHasDiskon(true);
@@ -4201,8 +4253,12 @@ export default function TagihanWarga({
 
     updateWargaList(updatedWargaList);
 
+    const finalTambahanNominal = (payHasTambahan && payTambahanNominal > 0) ? payTambahanNominal : 0;
+    const finalTambahanKet = payTambahanKet.trim() || 'Tambahan Manual';
+    const totalDiterima = netNominal + finalTambahanNominal;
+
     const nextKas = { ...kas };
-    nextKas[paymentTargetKas] += netNominal;
+    nextKas[paymentTargetKas] += totalDiterima;
     updateKas(nextKas);
 
     let ledgerDesc = `${category} Bulan ${bulan} ${tahun} - ${warga.nama} (Blok ${warga.blok}-${warga.noRumah})`;
@@ -4211,11 +4267,14 @@ export default function TagihanWarga({
     } else if (finalDiskon > 0) {
       ledgerDesc += ` [DISKON Rp ${finalDiskon.toLocaleString('id-ID')} - ${alasanDiskon}]`;
     }
+    if (finalTambahanNominal > 0) {
+      ledgerDesc += ` + Tambahan: Rp ${finalTambahanNominal.toLocaleString('id-ID')} (${finalTambahanKet})`;
+    }
 
     addLedgerEntry({
       tanggal: paymentDate,
       deskripsi: ledgerDesc,
-      jumlah: netNominal,
+      jumlah: totalDiterima,
       tipe: 'pemasukan',
       sumberKas: paymentTargetKas,
       kategori: category,
@@ -4236,7 +4295,10 @@ export default function TagihanWarga({
       category,
       bulan,
       tahun,
-      nominal: netNominal,
+      nominal: totalDiterima,
+      pokokNominal: netNominal,
+      tambahanNominal: finalTambahanNominal,
+      tambahanKet: finalTambahanKet,
       tanggalBayar: paymentDate,
       jamBayar: paymentTime,
       kasPenerima: paymentTargetKas,
@@ -4244,7 +4306,7 @@ export default function TagihanWarga({
       diskon: finalDiskon,
       isPembebasan: isPembebasan,
       alasanDiskon: alasanDiskon,
-      catatan: (isPembebasan ? `Bebas Iuran 100% (${alasanDiskon})` : (finalDiskon > 0 ? `Diskon Rp ${finalDiskon.toLocaleString('id-ID')} (${alasanDiskon})` : '')) + (paymentReceiptNamaFile ? ` | Gambar struk: ${paymentReceiptNamaFile}` : '')
+      catatan: (isPembebasan ? `Bebas Iuran 100% (${alasanDiskon})` : (finalDiskon > 0 ? `Diskon Rp ${finalDiskon.toLocaleString('id-ID')} (${alasanDiskon})` : '')) + (finalTambahanNominal > 0 ? ` | + Tambahan: Rp ${finalTambahanNominal.toLocaleString('id-ID')} (${finalTambahanKet})` : '') + (paymentReceiptNamaFile ? ` | Gambar struk: ${paymentReceiptNamaFile}` : '')
     });
 
     setPayingInfo(null);
@@ -4270,6 +4332,9 @@ export default function TagihanWarga({
     setPaymentReceiptBase64('');
     setPaymentReceiptNamaFile('');
     setPaymentReceipts([]);
+    setPayHasTambahan(false);
+    setPayTambahanKet('');
+    setPayTambahanNominal(0);
 
     if (warga.isBebasIuranPermanen) {
       setPayHasDiskon(true);
@@ -4378,19 +4443,26 @@ export default function TagihanWarga({
 
     updateWargaList(updatedWargaList);
 
+    const finalTambahanNominal = (payHasTambahan && payTambahanNominal > 0) ? payTambahanNominal : 0;
+    const finalTambahanKet = payTambahanKet.trim() || 'Tambahan Manual';
+    const totalDiterima = finalNetTotal + finalTambahanNominal;
+
     const nextKas = { ...kas };
-    nextKas[paymentTargetKas] += finalNetTotal;
+    nextKas[paymentTargetKas] += totalDiterima;
     updateKas(nextKas);
 
     const itemsDescription = items.map(item => `${item.bulan} ${item.tahun}`).join(', ');
-    const descSuffix = isPembebasan 
+    let descSuffix = isPembebasan 
       ? ` [Bebas 100%: ${alasanDiskon}]` 
       : (finalTotalDiskon > 0 ? ` [Diskon Rp ${finalTotalDiskon.toLocaleString('id-ID')}: ${alasanDiskon}]` : '');
+    if (finalTambahanNominal > 0) {
+      descSuffix += ` + Tambahan: Rp ${finalTambahanNominal.toLocaleString('id-ID')} (${finalTambahanKet})`;
+    }
 
     addLedgerEntry({
       tanggal: paymentDate,
       deskripsi: `${category} Kolektif (${itemsDescription}) - ${warga.nama} (Blok ${warga.blok}-${warga.noRumah})${descSuffix}`,
-      jumlah: finalNetTotal,
+      jumlah: totalDiterima,
       tipe: 'pemasukan',
       sumberKas: paymentTargetKas,
       kategori: category,
@@ -4411,7 +4483,10 @@ export default function TagihanWarga({
       category,
       bulan: itemsDescription,
       tahun: 0,
-      nominal: finalNetTotal,
+      nominal: totalDiterima,
+      pokokNominal: finalNetTotal,
+      tambahanNominal: finalTambahanNominal,
+      tambahanKet: finalTambahanKet,
       diskon: finalTotalDiskon > 0 ? finalTotalDiskon : undefined,
       isPembebasan: isPembebasan || undefined,
       alasanDiskon: payHasDiskon ? alasanDiskon : undefined,
@@ -4419,7 +4494,7 @@ export default function TagihanWarga({
       jamBayar: paymentTime,
       kasPenerima: paymentTargetKas,
       petugas: currentUser?.nama || 'Petugas RT',
-      catatan: (isPembebasan ? `Bebas Iuran Kolektif (${alasanDiskon})` : (finalTotalDiskon > 0 ? `Diskon Kolektif Rp ${finalTotalDiskon.toLocaleString('id-ID')} (${alasanDiskon})` : '')) + (paymentReceiptNamaFile ? ` | Gambar struk: ${paymentReceiptNamaFile}` : '')
+      catatan: (isPembebasan ? `Bebas Iuran Kolektif (${alasanDiskon})` : (finalTotalDiskon > 0 ? `Diskon Kolektif Rp ${finalTotalDiskon.toLocaleString('id-ID')} (${alasanDiskon})` : '')) + (finalTambahanNominal > 0 ? ` | + Tambahan: Rp ${finalTambahanNominal.toLocaleString('id-ID')} (${finalTambahanKet})` : '') + (paymentReceiptNamaFile ? ` | Gambar struk: ${paymentReceiptNamaFile}` : '')
     });
 
     setPayingBatchInfo(null);
@@ -6368,12 +6443,13 @@ export default function TagihanWarga({
 
     const displayCurrentMonth = waIncludeCurrent && unpaidCurrentMonthName;
     const displayPriorArrears = waIncludeArrears && (unpaidPriorMonths.length > 0 || priorArrears > 0);
+    const hasCustomAdditions = waCustomAdditions && waCustomAdditions.some(item => item.nominal > 0);
 
     let message = `Assalamualaikum wr.wb.\n\n*TAGIHAN IURAN BULANAN RT 08 PERUMTAS 3*\n`;
     message += `Kepada Yth. Bapak/Ibu: *${warga.nama}*\n`;
     message += `Alamat: *Blok ${warga.blok} No. ${warga.noRumah}*\n\n`;
 
-    if (!displayCurrentMonth && !displayPriorArrears) {
+    if (!displayCurrentMonth && !displayPriorArrears && !hasCustomAdditions) {
       const isActuallyLunas = unpaidRT.length === 0 && priorArrears === 0;
       if (isActuallyLunas) {
         message += `Selamat! Saat ini Anda *Lunas Seluruhnya* (Bebas tagihan iuran). Terima kasih banyak atas partisipasi aktif Bapak/Ibu! 🎉`;
@@ -6381,13 +6457,15 @@ export default function TagihanWarga({
         message += `Saat ini tidak ada rincian tagihan sesuai filter penagihan terpilih yang perlu dikirimkan.`;
       }
     } else {
-      message += `Berikut rincian tagihan iuran bulanan Anda:\n`;
+      message += `Berikut rincian tagihan iuran & kewajiban lingkungan Anda:\n`;
       let grandTotalAccumulated = 0;
+      let pokokTotal = 0;
 
       if (displayCurrentMonth) {
         const rate = getDefaultRtRate(selectedBillingYear, unpaidCurrentMonthName, rateRT);
         grandTotalAccumulated += rate;
-        message += `• *Tagihan Bulan Ini (${unpaidCurrentMonthName} ${selectedBillingYear})*: Rp ${rate.toLocaleString('id-ID')}\n`;
+        pokokTotal += rate;
+        message += `• *Tagihan Iuran RT Bulan Ini (${unpaidCurrentMonthName} ${selectedBillingYear})*: Rp ${rate.toLocaleString('id-ID')}\n`;
       }
 
       if (displayPriorArrears) {
@@ -6397,6 +6475,7 @@ export default function TagihanWarga({
             sub += getDefaultRtRate(selectedBillingYear, m, rateRT);
           });
           grandTotalAccumulated += sub;
+          pokokTotal += sub;
           const firstMonthRate = getDefaultRtRate(selectedBillingYear, unpaidPriorMonths[0], rateRT);
           let monthLabel = `Tagihan Bulan Sebelumnya`;
           if (!isSelYearCurrent) {
@@ -6407,11 +6486,27 @@ export default function TagihanWarga({
 
         if (priorArrears > 0) {
           grandTotalAccumulated += priorArrears;
+          pokokTotal += priorArrears;
           message += `• *Tagihan Tahun Sebelumnya*: Rp ${priorArrears.toLocaleString('id-ID')}\n`;
         }
       }
 
-      message += `\n*Total Tagihan: Rp ${grandTotalAccumulated.toLocaleString('id-ID')}*\n\n`;
+      let totalTambahan = 0;
+      if (hasCustomAdditions) {
+        waCustomAdditions.forEach(item => {
+          if (item.nominal > 0) {
+            totalTambahan += item.nominal;
+            grandTotalAccumulated += item.nominal;
+            message += `• *+ Tambahan (${item.nama || 'Lainnya'})*: + Rp ${item.nominal.toLocaleString('id-ID')}\n`;
+          }
+        });
+      }
+
+      if (totalTambahan > 0 && pokokTotal > 0) {
+        message += `\n*Total Tagihan: Rp ${grandTotalAccumulated.toLocaleString('id-ID')}* (Iuran RT Rp ${pokokTotal.toLocaleString('id-ID')} + Tambahan Rp ${totalTambahan.toLocaleString('id-ID')})\n\n`;
+      } else {
+        message += `\n*Total Tagihan: Rp ${grandTotalAccumulated.toLocaleString('id-ID')}*\n\n`;
+      }
       message += `Mohon untuk dapat melakukan pembayaran melalui Pengurus RT ${adminNameFormatted} / ${bendaharaNameFormatted}.\n`;
       message += `Terima kasih banyak atas perhatian dan partisipasi Bapak/Ibu demi kenyamanan lingkungan Perumtas 3 RT 08. 🙏`;
     }
@@ -6764,6 +6859,32 @@ export default function TagihanWarga({
                 >
                   <RefreshCw className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                   <span>Sinkronkan Dari Buku Kas</span>
+                </button>
+              )}
+
+              {isLoggedIn && (currentUser?.role === 'admin' || currentUser?.role === 'bendahara' || currentUser?.role === 'sekretaris') && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIncomeWargaId('');
+                    setIncomeIsWargaTerdaftar(true);
+                    setIncomeNominal('');
+                    setIncomeKategori('Pembayaran Tambahan RT');
+                    setIncomeCustomKategori('');
+                    setIncomeDeskripsi('');
+                    setIncomeKasPenerima('rtTunai');
+                    setIncomeTanggal(new Date().toISOString().split('T')[0]);
+                    setIncomePetugas(currentUser?.nama || 'Bendahara RT');
+                    setIncomeFotoBase64('');
+                    setIncomeFotoNamaFile('');
+                    setShowAddIncomeModal(true);
+                  }}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold px-3 py-2 rounded-lg transition duration-200 text-xs whitespace-nowrap cursor-pointer flex items-center justify-center gap-1.5 w-full md:w-auto active:scale-95 shadow-xs"
+                  title="Tambah Pemasukan Tambahan RT / Hibah / Sumbangan Warga"
+                  id="btn-tambah-pemasukan-rt"
+                >
+                  <PlusCircle className="w-4 h-4 shrink-0" />
+                  <span>+ Pemasukan RT</span>
                 </button>
               )}
 
@@ -8420,6 +8541,80 @@ export default function TagihanWarga({
                 )}
               </div>
 
+              {/* Opsi Tambahan Pembayaran Lain (Bisa Ditulis Manual - 1 Notifikasi Saja) */}
+              <div className="bg-amber-50/70 border border-amber-200/90 rounded-2xl p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="enable-pay-tambahan"
+                      checked={payHasTambahan}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setPayHasTambahan(checked);
+                        if (checked && payTambahanNominal === 0) {
+                          setPayTambahanNominal(50000);
+                        }
+                      }}
+                      className="w-4 h-4 text-amber-600 rounded focus:ring-amber-500 cursor-pointer accent-amber-600"
+                    />
+                    <label htmlFor="enable-pay-tambahan" className="text-xs font-extrabold text-amber-950 cursor-pointer flex items-center gap-1.5 select-none">
+                      <PlusCircle className="w-3.5 h-3.5 text-amber-600" />
+                      + Tambahan Pembayaran Lain (Manual - 1 Notifikasi Saja)
+                    </label>
+                  </div>
+                  {payHasTambahan && payTambahanNominal > 0 && (
+                    <span className="text-[10px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full font-mono">
+                      + Rp {payTambahanNominal.toLocaleString('id-ID')}
+                    </span>
+                  )}
+                </div>
+
+                {payHasTambahan && (
+                  <div className="space-y-3 pt-2 border-t border-amber-200/60 animate-in fade-in duration-150">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-amber-900 mb-1 font-mono">
+                        Keterangan Tambahan Pembayaran
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="cth: Sumbangan Lomba / Uang Kebersihan / Lainnya"
+                        value={payTambahanKet}
+                        onChange={(e) => setPayTambahanKet(e.target.value)}
+                        className="w-full bg-white border border-amber-300 rounded-xl p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500 font-medium"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-amber-900 mb-1 font-mono">
+                        Nominal Tambahan (Rp)
+                      </label>
+                      <input
+                        type="number"
+                        step="1000"
+                        placeholder="50000"
+                        value={payTambahanNominal || ''}
+                        onChange={(e) => setPayTambahanNominal(Math.max(0, Number(e.target.value)))}
+                        className="w-full bg-white border border-amber-300 rounded-xl p-2.5 text-xs text-slate-900 font-bold font-mono focus:outline-none focus:ring-2 focus:ring-amber-500"
+                      />
+                    </div>
+                    <div className="bg-amber-100/70 rounded-xl p-2.5 text-xs space-y-1 font-mono border border-amber-200">
+                      <div className="flex justify-between text-slate-600">
+                        <span>Iuran Pokok RT:</span>
+                        <span>Rp {(payDiskonType === 'pembebasan' ? 0 : Math.max(0, payingInfo.nominal - (payHasDiskon ? payDiskonNominal : 0))).toLocaleString('id-ID')}</span>
+                      </div>
+                      <div className="flex justify-between text-amber-900 font-bold">
+                        <span>+ Tambahan Lain:</span>
+                        <span>+ Rp {(payTambahanNominal || 0).toLocaleString('id-ID')}</span>
+                      </div>
+                      <div className="flex justify-between font-extrabold text-emerald-800 text-sm border-t border-amber-300/80 pt-1">
+                        <span>Total Diterima:</span>
+                        <span>Rp {((payDiskonType === 'pembebasan' ? 0 : Math.max(0, payingInfo.nominal - (payHasDiskon ? payDiskonNominal : 0))) + (payTambahanNominal || 0)).toLocaleString('id-ID')}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <div>
                 <label className="block text-xs font-semibold text-slate-605 mb-1.5 font-mono">Target Penerimaan Kas Pelunasan (Iuran RT Tunai / Iuran RT Bank)</label>
                 <select
@@ -8593,6 +8788,80 @@ export default function TagihanWarga({
             </div>
 
             <div className="space-y-4">
+              {/* Opsi Tambahan Pembayaran Lain (Bisa Ditulis Manual - 1 Notifikasi Saja) */}
+              <div className="bg-amber-50/70 border border-amber-200/90 rounded-2xl p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="enable-batch-pay-tambahan"
+                      checked={payHasTambahan}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setPayHasTambahan(checked);
+                        if (checked && payTambahanNominal === 0) {
+                          setPayTambahanNominal(50000);
+                        }
+                      }}
+                      className="w-4 h-4 text-amber-600 rounded focus:ring-amber-500 cursor-pointer accent-amber-600"
+                    />
+                    <label htmlFor="enable-batch-pay-tambahan" className="text-xs font-extrabold text-amber-950 cursor-pointer flex items-center gap-1.5 select-none">
+                      <PlusCircle className="w-3.5 h-3.5 text-amber-600" />
+                      + Tambahan Pembayaran Lain (Manual - 1 Notifikasi Saja)
+                    </label>
+                  </div>
+                  {payHasTambahan && payTambahanNominal > 0 && (
+                    <span className="text-[10px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full font-mono">
+                      + Rp {payTambahanNominal.toLocaleString('id-ID')}
+                    </span>
+                  )}
+                </div>
+
+                {payHasTambahan && (
+                  <div className="space-y-3 pt-2 border-t border-amber-200/60 animate-in fade-in duration-150">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-amber-900 mb-1 font-mono">
+                        Keterangan Tambahan Pembayaran
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="cth: Sumbangan Lomba / Uang Kebersihan / Lainnya"
+                        value={payTambahanKet}
+                        onChange={(e) => setPayTambahanKet(e.target.value)}
+                        className="w-full bg-white border border-amber-300 rounded-xl p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500 font-medium"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-amber-900 mb-1 font-mono">
+                        Nominal Tambahan (Rp)
+                      </label>
+                      <input
+                        type="number"
+                        step="1000"
+                        placeholder="50000"
+                        value={payTambahanNominal || ''}
+                        onChange={(e) => setPayTambahanNominal(Math.max(0, Number(e.target.value)))}
+                        className="w-full bg-white border border-amber-300 rounded-xl p-2.5 text-xs text-slate-900 font-bold font-mono focus:outline-none focus:ring-2 focus:ring-amber-500"
+                      />
+                    </div>
+                    <div className="bg-amber-100/70 rounded-xl p-2.5 text-xs space-y-1 font-mono border border-amber-200">
+                      <div className="flex justify-between text-slate-600">
+                        <span>Iuran Pokok Kolektif:</span>
+                        <span>Rp {payingBatchInfo.totalNominal.toLocaleString('id-ID')}</span>
+                      </div>
+                      <div className="flex justify-between text-amber-900 font-bold">
+                        <span>+ Tambahan Lain:</span>
+                        <span>+ Rp {(payTambahanNominal || 0).toLocaleString('id-ID')}</span>
+                      </div>
+                      <div className="flex justify-between font-extrabold text-emerald-800 text-sm border-t border-amber-300/80 pt-1">
+                        <span>Total Diterima:</span>
+                        <span>Rp {(payingBatchInfo.totalNominal + (payTambahanNominal || 0)).toLocaleString('id-ID')}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <div>
                 <label className="block text-xs font-bold text-slate-700 font-mono mb-2">Pilihan Metode Pembayaran (Cash atau Bank)</label>
                 <div className="grid grid-cols-2 gap-3">
@@ -9198,6 +9467,492 @@ export default function TagihanWarga({
         </div>
       )}
 
+      {/* MODAL TAMBAH PEMASUKAN RT / PEMBAYARAN TAMBAHAN / HIBAH WARGA */}
+      {showAddIncomeModal && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-4 z-[105] animate-in fade-in duration-200 overflow-y-auto">
+          <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-2xl relative animate-in zoom-in-95 duration-200 text-slate-800 max-w-lg w-full font-sans max-h-[92vh] overflow-y-auto">
+            <button 
+              type="button"
+              onClick={() => setShowAddIncomeModal(false)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-slate-700 cursor-pointer p-1.5 rounded-full hover:bg-slate-100 transition"
+              title="Tutup Formulir"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-3 mb-4 pb-3 border-b border-slate-100">
+              <div className="w-11 h-11 bg-emerald-100 rounded-2xl flex items-center justify-center text-emerald-600 shrink-0 shadow-xs">
+                <PlusCircle className="w-6 h-6 stroke-[2.5]" />
+              </div>
+              <div>
+                <h4 className="font-extrabold text-slate-900 text-base leading-snug">
+                  Catat Pemasukan RT / Tambahan
+                </h4>
+                <p className="text-[11px] text-slate-500 font-medium">
+                  Pencatatan dana hibah warga, sumbangan, atau pembayaran tambahan
+                </p>
+              </div>
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const parsedAmount = parseInt(incomeNominal.toString().replace(/[^\d]/g, ''), 10);
+                if (!parsedAmount || isNaN(parsedAmount) || parsedAmount <= 0) {
+                  alert('Mohon masukkan nominal penerimaan yang valid (minimal Rp 1).');
+                  return;
+                }
+
+                const selectedWarga = incomeIsWargaTerdaftar && incomeWargaId
+                  ? wargaList.find(w => w.id === incomeWargaId)
+                  : null;
+
+                const finalKategori = incomeKategori === 'Lainnya'
+                  ? (incomeCustomKategori.trim() || 'Pemasukan Lainnya RT')
+                  : incomeKategori;
+
+                const namaPenyetor = selectedWarga 
+                  ? selectedWarga.nama 
+                  : (incomeManualNama.trim() || 'Warga RT 08');
+
+                const unitPenyetor = selectedWarga
+                  ? `Blok ${selectedWarga.blok}-${selectedWarga.noRumah}`
+                  : (incomeManualBlok.trim() ? `${incomeManualBlok.trim()} ${incomeManualNoRumah.trim()}` : 'RT 08 RW 04');
+
+                const finalDesc = incomeDeskripsi.trim() || `${finalKategori} - ${namaPenyetor} (${unitPenyetor})`;
+
+                const todayStr = incomeTanggal || new Date().toISOString().split('T')[0];
+                const jamStr = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+
+                // 1. Add to Ledger
+                addLedgerEntry({
+                  tanggal: todayStr,
+                  tanggalInput: new Date().toISOString().split('T')[0],
+                  deskripsi: finalDesc,
+                  jumlah: parsedAmount,
+                  tipe: 'pemasukan',
+                  sumberKas: incomeKasPenerima,
+                  kategori: finalKategori,
+                  petugas: incomePetugas.trim() || currentUser?.nama || 'Bendahara RT',
+                  wargaId: selectedWarga?.id,
+                  isNonTagihan: true,
+                  fotoBase64: incomeFotoBase64 || undefined,
+                  fotoNamaFile: incomeFotoNamaFile || undefined
+                });
+
+                // 2. Update Balance Kas
+                const updatedBalance = { ...kas };
+                updatedBalance[incomeKasPenerima] = (updatedBalance[incomeKasPenerima] || 0) + parsedAmount;
+                updateKas(updatedBalance);
+
+                // 3. Close this modal and open Receipt Modal with WhatsApp preview
+                setShowAddIncomeModal(false);
+                setReceiptSuccessInfo({
+                  id: selectedWarga?.id || `INC-${Date.now().toString().slice(-6)}`,
+                  nama: namaPenyetor,
+                  tipe: 'warga',
+                  blok: selectedWarga ? selectedWarga.blok : (incomeManualBlok.trim() || 'RT 08'),
+                  noRumah: selectedWarga ? selectedWarga.noRumah : (incomeManualNoRumah.trim() || 'RW 04'),
+                  noWa: selectedWarga ? (selectedWarga.noWa || '') : incomeManualNoWa.trim(),
+                  category: finalKategori,
+                  bulan: todayStr,
+                  tahun: parseInt(todayStr.split('-')[0], 10) || new Date().getFullYear(),
+                  nominal: parsedAmount,
+                  tanggalBayar: todayStr,
+                  jamBayar: jamStr,
+                  kasPenerima: incomeKasPenerima,
+                  petugas: incomePetugas.trim() || currentUser?.nama || 'Bendahara RT',
+                  catatan: finalDesc,
+                  isNonTagihan: true
+                });
+              }}
+              className="space-y-3.5 text-xs"
+            >
+              {/* Opsi Tipe Penyetor: Warga Terdaftar / Warga Luar */}
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                  Sumber / Pihak Penyetor
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIncomeIsWargaTerdaftar(true);
+                      if (!incomeWargaId && wargaList.length > 0) {
+                        setIncomeWargaId(wargaList[0].id);
+                      }
+                    }}
+                    className={`p-2.5 rounded-xl border text-left flex items-center gap-2 cursor-pointer transition ${
+                      incomeIsWargaTerdaftar
+                        ? 'border-emerald-500 bg-emerald-50/70 text-emerald-950 font-bold shadow-xs ring-1 ring-emerald-500'
+                        : 'border-slate-200 hover:bg-slate-50 text-slate-600'
+                    }`}
+                  >
+                    <UserCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <div>
+                      <div className="font-extrabold text-xs">Warga Terdaftar RT</div>
+                      <div className="text-[10px] text-slate-500 font-normal">Pilih dari data warga</div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIncomeIsWargaTerdaftar(false);
+                      setIncomeWargaId('');
+                    }}
+                    className={`p-2.5 rounded-xl border text-left flex items-center gap-2 cursor-pointer transition ${
+                      !incomeIsWargaTerdaftar
+                        ? 'border-emerald-500 bg-emerald-50/70 text-emerald-950 font-bold shadow-xs ring-1 ring-emerald-500'
+                        : 'border-slate-200 hover:bg-slate-50 text-slate-600'
+                    }`}
+                  >
+                    <Users className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <div>
+                      <div className="font-extrabold text-xs">Pihak Luar / Donatur</div>
+                      <div className="text-[10px] text-slate-500 font-normal">Input nama manual</div>
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {/* Pemilihan Warga Terdaftar */}
+              {incomeIsWargaTerdaftar ? (
+                <div>
+                  <div className="flex justify-between items-center mb-1">
+                    <label className="text-[11px] font-bold text-slate-700">
+                      Pilih Nama Warga <span className="text-red-500">*</span>
+                    </label>
+                    <span className="text-[10px] text-slate-400 font-mono">
+                      {wargaList.length} Warga Terdaftar
+                    </span>
+                  </div>
+
+                  {/* Filter / Search Warga */}
+                  <div className="relative mb-1.5">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+                    <input
+                      type="text"
+                      placeholder="Ketik cari nama atau blok rumah warga..."
+                      value={incomeSearchWarga}
+                      onChange={(e) => setIncomeSearchWarga(e.target.value)}
+                      className="w-full pl-8 pr-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:ring-1 focus:ring-emerald-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <select
+                    value={incomeWargaId}
+                    onChange={(e) => {
+                      setIncomeWargaId(e.target.value);
+                      const w = wargaList.find(item => item.id === e.target.value);
+                      if (w) {
+                        setIncomeDeskripsi(`${incomeKategori} - Bpk/Ibu ${w.nama} (Blok ${w.blok}-${w.noRumah})`);
+                      }
+                    }}
+                    className="w-full p-2 border border-slate-250 rounded-xl font-medium text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none bg-white"
+                  >
+                    <option value="">-- Pilih Warga Penyetor --</option>
+                    {wargaList
+                      .filter(w => {
+                        if (!incomeSearchWarga) return true;
+                        const q = incomeSearchWarga.toLowerCase();
+                        return (
+                          w.nama.toLowerCase().includes(q) ||
+                          w.blok.toLowerCase().includes(q) ||
+                          w.noRumah.toLowerCase().includes(q)
+                        );
+                      })
+                      .sort((a, b) => a.nama.localeCompare(b.nama))
+                      .map(w => (
+                        <option key={w.id} value={w.id}>
+                          {w.nama} • Blok {w.blok}-{w.noRumah} {w.noWa ? `• ${w.noWa}` : ''}
+                        </option>
+                      ))}
+                  </select>
+
+                  {incomeWargaId && (() => {
+                    const selected = wargaList.find(w => w.id === incomeWargaId);
+                    if (!selected) return null;
+                    return (
+                      <div className="mt-1.5 p-2 bg-emerald-50/70 border border-emerald-200/80 rounded-xl flex items-center justify-between text-[11px]">
+                        <div>
+                          <div className="font-extrabold text-emerald-950">{selected.nama}</div>
+                          <div className="text-emerald-700">Blok {selected.blok}-{selected.noRumah}</div>
+                        </div>
+                        <div className="text-right">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold">
+                            <Check className="w-3 h-3" />
+                            {selected.noWa || 'Tanpa WA'}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              ) : (
+                <div className="space-y-2 p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-700 mb-1">
+                      Nama Lengkap / Instansi Donatur <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required={!incomeIsWargaTerdaftar}
+                      placeholder="Contoh: Bpk. Haryanto / Panitia Qurban / Donatur Hamba Allah"
+                      value={incomeManualNama}
+                      onChange={(e) => setIncomeManualNama(e.target.value)}
+                      className="w-full p-2 border border-slate-250 rounded-lg text-xs bg-white focus:ring-1 focus:ring-emerald-500 focus:outline-none"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-700 mb-1">
+                        Blok / Alamat / Keterangan
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Contoh: Blok B-12 / Luar RT"
+                        value={incomeManualBlok}
+                        onChange={(e) => setIncomeManualBlok(e.target.value)}
+                        className="w-full p-2 border border-slate-250 rounded-lg text-xs bg-white focus:ring-1 focus:ring-emerald-500 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-700 mb-1">
+                        Nomor WhatsApp (Untuk Struk WA)
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Contoh: 08123456789"
+                        value={incomeManualNoWa}
+                        onChange={(e) => setIncomeManualNoWa(e.target.value)}
+                        className="w-full p-2 border border-slate-250 rounded-lg text-xs bg-white focus:ring-1 focus:ring-emerald-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Kategori Pemasukan */}
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                  Kategori Pemasukan <span className="text-red-500">*</span>
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 mb-1.5">
+                  {[
+                    'Hibah Warga',
+                    'Sumbangan / Donasi Warga',
+                    'Pembayaran Tambahan RT',
+                    'Iuran Sukarela Warga',
+                    'Sumbangan Acara Lingkungan',
+                    'Lainnya'
+                  ].map((kat) => (
+                    <button
+                      key={kat}
+                      type="button"
+                      onClick={() => {
+                        setIncomeKategori(kat);
+                        const selectedWarga = wargaList.find(w => w.id === incomeWargaId);
+                        const nama = selectedWarga ? selectedWarga.nama : (incomeManualNama || 'Warga');
+                        const unit = selectedWarga ? `(Blok ${selectedWarga.blok}-${selectedWarga.noRumah})` : '';
+                        if (kat !== 'Lainnya') {
+                          setIncomeDeskripsi(`${kat} - ${nama} ${unit}`.trim());
+                        }
+                      }}
+                      className={`px-2 py-1.5 rounded-lg border text-[10.5px] font-bold text-center cursor-pointer transition leading-tight ${
+                        incomeKategori === kat
+                          ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                          : 'bg-white text-slate-700 border-slate-250 hover:bg-slate-50'
+                      }`}
+                    >
+                      {kat}
+                    </button>
+                  ))}
+                </div>
+
+                {incomeKategori === 'Lainnya' && (
+                  <input
+                    type="text"
+                    required
+                    placeholder="Tuliskan nama kategori pemasukan lainnya..."
+                    value={incomeCustomKategori}
+                    onChange={(e) => setIncomeCustomKategori(e.target.value)}
+                    className="w-full p-2 border border-slate-250 rounded-lg text-xs focus:ring-1 focus:ring-emerald-500 focus:outline-none"
+                  />
+                )}
+              </div>
+
+              {/* Nominal & Quick Pills */}
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                  Nominal Penerimaan (Rp) <span className="text-red-500">*</span>
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-2.5 font-black text-slate-400 font-mono text-xs">
+                    Rp
+                  </span>
+                  <input
+                    type="text"
+                    required
+                    placeholder="0"
+                    value={incomeNominal ? Number(incomeNominal.toString().replace(/[^\d]/g, '')).toLocaleString('id-ID') : ''}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/[^\d]/g, '');
+                      setIncomeNominal(val);
+                    }}
+                    className="w-full pl-10 pr-3 py-2 border border-slate-300 rounded-xl text-sm font-black font-mono text-emerald-700 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                </div>
+
+                {/* Quick Nominal Pills */}
+                <div className="flex flex-wrap gap-1.5 mt-1.5">
+                  {[25000, 50000, 100000, 200000, 500000, 1000000].map((nominal) => (
+                    <button
+                      key={nominal}
+                      type="button"
+                      onClick={() => setIncomeNominal(nominal.toString())}
+                      className="px-2 py-0.5 rounded-md bg-slate-100 hover:bg-emerald-50 hover:text-emerald-700 text-slate-600 text-[10px] font-bold font-mono transition cursor-pointer border border-slate-200"
+                    >
+                      +{nominal.toLocaleString('id-ID')}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Kas Penerima & Tanggal */}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-700 mb-1">
+                    Kas RT Penerima <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={incomeKasPenerima}
+                    onChange={(e) => setIncomeKasPenerima(e.target.value as keyof Balance)}
+                    className="w-full p-2 border border-slate-250 rounded-xl text-xs bg-white focus:ring-1 focus:ring-emerald-500 focus:outline-none font-bold"
+                  >
+                    <option value="rtTunai">Kas Tunai RT</option>
+                    <option value="rtPettyCash">Kas Kecil (Petty Cash)</option>
+                    <option value="rtBank">Kas Bank / Rekening RT</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-700 mb-1">
+                    Tanggal Transaksi <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={incomeTanggal}
+                    onChange={(e) => setIncomeTanggal(e.target.value)}
+                    className="w-full p-2 border border-slate-250 rounded-xl text-xs bg-white focus:ring-1 focus:ring-emerald-500 focus:outline-none font-bold font-mono"
+                  />
+                </div>
+              </div>
+
+              {/* Keterangan Transaksi */}
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                  Keterangan / Keperluan Transaksi
+                </label>
+                <textarea
+                  rows={2}
+                  placeholder="Contoh: Hibah sukarela warga untuk pembelian lampu jalan & operasional RT"
+                  value={incomeDeskripsi}
+                  onChange={(e) => setIncomeDeskripsi(e.target.value)}
+                  className="w-full p-2 border border-slate-250 rounded-xl text-xs focus:ring-1 focus:ring-emerald-500 focus:outline-none"
+                />
+              </div>
+
+              {/* Petugas Penerima */}
+              <div>
+                <label className="block text-[10px] font-bold text-slate-700 mb-1">
+                  Nama Petugas Penerima
+                </label>
+                <input
+                  type="text"
+                  placeholder="Bendahara RT / Nama Petugas"
+                  value={incomePetugas}
+                  onChange={(e) => setIncomePetugas(e.target.value)}
+                  className="w-full p-2 border border-slate-250 rounded-xl text-xs focus:ring-1 focus:ring-emerald-500 focus:outline-none font-medium"
+                />
+              </div>
+
+              {/* Upload Foto / Bukti Struk (Opsional) */}
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-[10px] font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1">
+                    <Camera className="w-3.5 h-3.5 text-slate-500" />
+                    Foto Bukti Transfer / Nota Fisik (Opsional)
+                  </span>
+                  {incomeFotoBase64 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIncomeFotoBase64('');
+                        setIncomeFotoNamaFile('');
+                      }}
+                      className="text-[10px] text-red-500 hover:text-red-700 font-bold cursor-pointer"
+                    >
+                      Hapus Foto
+                    </button>
+                  )}
+                </div>
+
+                {incomeFotoBase64 ? (
+                  <div className="flex items-center gap-3">
+                    <img
+                      src={incomeFotoBase64}
+                      alt="Preview Bukti"
+                      className="w-14 h-14 object-cover rounded-lg border border-slate-250 shadow-2xs"
+                    />
+                    <div className="text-[11px] text-slate-600 truncate max-w-[200px]">
+                      {incomeFotoNamaFile || 'Bukti_Transfer.jpg'}
+                    </div>
+                  </div>
+                ) : (
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        try {
+                          const base64 = await compressImage(file, 800, 0.7);
+                          setIncomeFotoBase64(base64);
+                          setIncomeFotoNamaFile(file.name);
+                        } catch (err) {
+                          alert('Gagal memproses gambar. Pastikan format file berupa foto/gambar.');
+                        }
+                      }
+                    }}
+                    className="block w-full text-xs text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-extrabold file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100 cursor-pointer"
+                  />
+                )}
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-2 justify-end pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowAddIncomeModal(false)}
+                  className="px-4 py-2.5 rounded-xl text-slate-500 hover:bg-slate-100 text-xs font-bold transition cursor-pointer"
+                >
+                  Batalkan
+                </button>
+                <button
+                  type="submit"
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-black px-5 py-2.5 rounded-xl text-xs flex items-center gap-2 shadow-lg shadow-emerald-600/10 cursor-pointer active:scale-97 transition"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>Simpan &amp; Buat Tanda Terima WA</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* 4. MODAL DETIL SUKSES VERIFIKASI PEMBAYARAN & WHATSAPP RECEIPT NOTIFIKASI */}
       {receiptSuccessInfo && (
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-4 z-[110] animate-in fade-in duration-200 overflow-y-auto">
@@ -9217,20 +9972,22 @@ export default function TagihanWarga({
                 <Check className="w-6 h-6 stroke-[3]" />
               </div>
               <h4 className="font-black text-slate-900 text-base leading-snug">
-                Pembayaran Sukses Diverifikasi!
+                {receiptSuccessInfo.isNonTagihan ? 'Penerimaan Dana Telah Tercatat!' : 'Bukti Penerimaan RT Berhasil Dibuat!'}
               </h4>
               <p className="text-[11px] text-emerald-600 font-extrabold tracking-wide uppercase font-mono block mt-0.5">
-                Status: Lunas &amp; Dicatat Kas 🟢
+                Status: {receiptSuccessInfo.isNonTagihan ? 'Telah Diterima & Dicatat Kas 🟢' : 'Lunas & Dicatat Kas 🟢'}
               </p>
             </div>
 
             {/* Visual Rincian / Kuitansi PNG Preview */}
             {receiptSuccessPNGUrl ? (
               <div className="mb-4 border border-slate-200 rounded-2xl overflow-hidden bg-slate-50 p-2 shadow-inner">
-                <p className="text-[10px] text-slate-500 font-bold mb-1.5 text-center font-mono uppercase tracking-wider">Gambar Kuitansi Digital (PNG) 📸</p>
+                <p className="text-[10px] text-slate-500 font-bold mb-1.5 text-center font-mono uppercase tracking-wider">
+                  {receiptSuccessInfo.isNonTagihan ? 'Gambar Tanda Terima Digital (PNG) 📸' : 'Gambar Bukti Penerimaan RT (PNG) 📸'}
+                </p>
                 <img 
                   src={receiptSuccessPNGUrl} 
-                  alt="Kuitansi Digital" 
+                  alt={receiptSuccessInfo.isNonTagihan ? 'Tanda Terima Digital' : 'Bukti Penerimaan RT Digital'} 
                   className="w-full rounded-lg border border-slate-100 shadow-md transition hover:scale-[1.01] duration-250"
                 />
                 <p className="text-[9px] text-slate-400 text-center mt-1.5 italic">
@@ -9246,11 +10003,15 @@ export default function TagihanWarga({
             {/* Rincian Finansial Kuitansi */}
             <div className="bg-slate-50 border border-slate-150 rounded-2xl p-4 space-y-2.5 text-[11px]">
               <div className="flex justify-between items-center border-b border-slate-200/60 pb-1.5">
-                <span className="text-slate-455 font-bold uppercase tracking-wider font-mono">Kategori Iuran</span>
+                <span className="text-slate-455 font-bold uppercase tracking-wider font-mono">
+                  {receiptSuccessInfo.isNonTagihan ? 'Kategori Penerimaan' : 'Kategori Penerimaan'}
+                </span>
                 <span className="font-extrabold text-slate-900">{receiptSuccessInfo.category}</span>
               </div>
               <div className="flex justify-between items-center border-b border-slate-200/60 pb-1.5">
-                <span className="text-slate-455 font-bold uppercase tracking-wider font-mono">Nama Pembayar</span>
+                <span className="text-slate-455 font-bold uppercase tracking-wider font-mono">
+                  {receiptSuccessInfo.isNonTagihan ? 'Diterima Dari' : 'Nama Pembayar'}
+                </span>
                 <span className="font-extrabold text-slate-900">{receiptSuccessInfo.nama}</span>
               </div>
               <div className="flex justify-between items-center border-b border-slate-200/60 pb-1.5">
@@ -9264,9 +10025,13 @@ export default function TagihanWarga({
                 </span>
               </div>
               <div className="flex justify-between items-center border-b border-slate-200/60 pb-1.5">
-                <span className="text-slate-455 font-bold uppercase tracking-wider font-mono">Periode Pembayaran</span>
+                <span className="text-slate-455 font-bold uppercase tracking-wider font-mono">
+                  {receiptSuccessInfo.isNonTagihan ? 'Tanggal Penerimaan' : 'Periode Pembayaran'}
+                </span>
                 <span className="font-extrabold text-slate-900">
-                  {/\b\d{4}\b/.test(receiptSuccessInfo.bulan || '') ? receiptSuccessInfo.bulan : `${receiptSuccessInfo.bulan} ${receiptSuccessInfo.tahun || ''}`}
+                  {receiptSuccessInfo.isNonTagihan 
+                    ? receiptSuccessInfo.tanggalBayar 
+                    : (/\b\d{4}\b/.test(receiptSuccessInfo.bulan || '') ? receiptSuccessInfo.bulan : `${receiptSuccessInfo.bulan} ${receiptSuccessInfo.tahun || ''}`)}
                 </span>
               </div>
               <div className="flex justify-between items-center border-b border-slate-200/60 pb-1.5">
@@ -9287,11 +10052,31 @@ export default function TagihanWarga({
               </div>
               {receiptSuccessInfo.catatan && (
                 <div className="flex justify-between items-center border-b border-slate-200/60 pb-1.5">
-                  <span className="text-slate-455 font-bold uppercase tracking-wider font-mono">Berkas Struk</span>
+                  <span className="text-slate-455 font-bold uppercase tracking-wider font-mono">
+                    {receiptSuccessInfo.isNonTagihan ? 'Keterangan' : 'Berkas Struk'}
+                  </span>
                   <span className="font-extrabold text-slate-500 truncate max-w-[200px]" title={receiptSuccessInfo.catatan}>
                     {receiptSuccessInfo.catatan}
                   </span>
                 </div>
+              )}
+              {receiptSuccessInfo.tambahanNominal && receiptSuccessInfo.tambahanNominal > 0 && (
+                <>
+                  <div className="flex justify-between items-center border-b border-slate-200/60 pb-1.5">
+                    <span className="text-slate-455 font-bold uppercase tracking-wider font-mono">Iuran Pokok RT</span>
+                    <span className="font-bold text-slate-800 font-mono">
+                      Rp {(receiptSuccessInfo.pokokNominal || (receiptSuccessInfo.nominal - receiptSuccessInfo.tambahanNominal)).toLocaleString('id-ID')}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center border-b border-slate-200/60 pb-1.5 text-amber-900">
+                    <span className="font-bold uppercase tracking-wider font-mono">
+                      Tambahan ({receiptSuccessInfo.tambahanKet || 'Lainnya'})
+                    </span>
+                    <span className="font-bold font-mono">
+                      + Rp {receiptSuccessInfo.tambahanNominal.toLocaleString('id-ID')}
+                    </span>
+                  </div>
+                </>
               )}
               <div className="flex justify-between items-center pt-0.5">
                 <span className="text-slate-455 font-bold uppercase tracking-wider font-mono text-xs">Total Nominal</span>
@@ -9302,7 +10087,7 @@ export default function TagihanWarga({
             </div>
 
             {/* Visual Kartu Ucapan Terima Kasih (Premium Gratitude Card) */}
-            <div className="mt-3.5 bg-gradient-to-br from-emerald-500/10 to-teal-500/5 border border-emerald-250/60 rounded-2xl p-3.5 text-center relative overflow-hidden group shadow`xs border-dashed animate-in slide-in-from-bottom-2 duration-300">
+            <div className="mt-3.5 bg-gradient-to-br from-emerald-500/10 to-teal-500/5 border border-emerald-250/60 rounded-2xl p-3.5 text-center relative overflow-hidden group shadow-xs border-dashed animate-in slide-in-from-bottom-2 duration-300">
               <div className="absolute top-0 right-0 w-16 h-16 bg-emerald-100/30 rounded-bl-full pointer-events-none transition duration-500 group-hover:scale-110" />
               <div className="absolute -left-2 -bottom-2 text-3xl opacity-15 pointer-events-none select-none">🎉</div>
               <div className="absolute -right-2 -bottom-2 text-3xl opacity-15 pointer-events-none select-none">🌸</div>
@@ -9312,15 +10097,21 @@ export default function TagihanWarga({
               </div>
               
               <h5 className="text-xs font-black text-emerald-950 leading-snug">
-                Terima Kasih Banyak Atas Pembayaran Anda! 🙏
+                {receiptSuccessInfo.isNonTagihan ? 'Telah Diterima Dengan Baik! 🙏' : 'Terima Kasih Banyak Atas Pembayaran Anda! 🙏'}
               </h5>
               
               <p className="text-[10.5px] text-slate-650 leading-relaxed mt-2 font-medium font-sans">
-                Terima kasih atas partisipasi aktif Bapak/Ibu <span className="font-extrabold text-emerald-800">{receiptSuccessInfo.nama}</span> dalam pelunasan {receiptSuccessInfo.bulan.includes(',') ? 'Kolektif ' : ''}<strong className="text-slate-805 font-bold">{receiptSuccessInfo.category} ({/\b\d{4}\b/.test(receiptSuccessInfo.bulan || '') ? receiptSuccessInfo.bulan : `${receiptSuccessInfo.bulan} ${receiptSuccessInfo.tahun || ''}`})</strong>.
+                {receiptSuccessInfo.isNonTagihan ? (
+                  <>Alhamdulillah, telah kami terima dana/pemasukan dari Bapak/Ibu <span className="font-extrabold text-emerald-800">{receiptSuccessInfo.nama}</span> untuk keperluan <strong className="text-slate-805 font-bold">{receiptSuccessInfo.category}</strong> sebesar <strong className="text-emerald-700 font-extrabold">Rp {receiptSuccessInfo.nominal.toLocaleString('id-ID')}</strong>.</>
+                ) : (
+                  <>Terima kasih atas partisipasi aktif Bapak/Ibu <span className="font-extrabold text-emerald-800">{receiptSuccessInfo.nama}</span> dalam pelunasan {receiptSuccessInfo.bulan.includes(',') ? 'Kolektif ' : ''}<strong className="text-slate-805 font-bold">{receiptSuccessInfo.category} ({/\b\d{4}\b/.test(receiptSuccessInfo.bulan || '') ? receiptSuccessInfo.bulan : `${receiptSuccessInfo.bulan} ${receiptSuccessInfo.tahun || ''}`})</strong>.</>
+                )}
               </p>
               
               <p className="text-[10px] text-slate-505 leading-relaxed mt-1.5 font-semibold italic bg-white/70 border border-slate-100 p-1.5 rounded-xl">
-                "Kontribusi nyata Bapak/Ibu adalah wujud kepedulian berharga yang menguatkan tali kekeluargaan, menjaga kehangatan paguyuban warga, serta membawa kebaikan bersama di RT 08 Perumahan TAS 3."
+                {receiptSuccessInfo.isNonTagihan
+                  ? '"Terima kasih banyak atas partisipasi, kebaikan, dan kontribusi nyata Bapak/Ibu dalam mendukung kemajuan lingkungan RT 08 Perumahan TAS 3. Semoga membawa keberkahan bersama."'
+                  : '"Kontribusi nyata Bapak/Ibu adalah wujud kepedulian berharga yang menguatkan tali kekeluargaan, menjaga kehangatan paguyuban warga, serta membawa kebaikan bersama di RT 08 Perumahan TAS 3."'}
               </p>
               
               <div className="flex justify-center gap-1 mt-2.5">
@@ -9351,6 +10142,8 @@ export default function TagihanWarga({
                     ? `Blok ${receiptSuccessInfo.blok}-${receiptSuccessInfo.noRumah}`
                     : `No Lapak ${receiptSuccessInfo.noLapak}`;
 
+                  const isNonTagihan = receiptSuccessInfo.isNonTagihan;
+
                   const isBatch = receiptSuccessInfo.bulan.includes(',');
                   const numMonths = isBatch ? receiptSuccessInfo.bulan.split(',').length : 1;
                   const tipeBayarText = isBatch ? `\n• Jenis: Pembayaran Kolektif (${numMonths} Bulan)` : '';
@@ -9364,7 +10157,13 @@ export default function TagihanWarga({
                     diskonText = `\n• Diskon Potongan: Rp ${receiptSuccessInfo.diskon.toLocaleString('id-ID')} (${receiptSuccessInfo.alasanDiskon || 'Kebijakan RT'})`;
                   }
 
-                  const textMessage = `Assalamualaikum wr.wb.\n\n*BUKTI PEMBAYARAN IURAN RT 08* ✅\n\nHalo Bapak/Ibu *${receiptSuccessInfo.nama}*,\nTerima kasih, pembayaran Iuran Anda telah sukses kami verifikasi.\n\n*Detail Pembayaran:*\n• Nama: ${receiptSuccessInfo.nama}\n• Unit: ${detailLoc}\n• Kategori: ${receiptSuccessInfo.category}${tipeBayarText}\n• Periode: ${periodeText}${diskonText}\n• Total Bayar: Rp ${receiptSuccessInfo.nominal.toLocaleString('id-ID')}\n• Tanggal: ${receiptSuccessInfo.tanggalBayar} ${receiptSuccessInfo.jamBayar}\n• Penerima: KAS ${receiptSuccessInfo.kasPenerima.toUpperCase()}\n• Petugas: ${receiptSuccessInfo.petugas}\n\n*Status:* LUNAS & TERVERIFIKASI 🟢\n\nTerima kasih atas partisipasi aktif Bapak/Ibu dalam mendukung program pembangunan lingkungan RT 08 Perumahan TAS 3.\n\nSalam hangat,\n*Pengurus RT 08 Perumahan TAS 3* 🙏`;
+                  const rincianTambahanText = (receiptSuccessInfo.tambahanNominal && receiptSuccessInfo.tambahanNominal > 0)
+                    ? `\n• Rincian Penerimaan:\n  - Iuran RT: Rp ${(receiptSuccessInfo.pokokNominal || (receiptSuccessInfo.nominal - receiptSuccessInfo.tambahanNominal)).toLocaleString('id-ID')}\n  - Tambahan (${receiptSuccessInfo.tambahanKet || 'Lainnya'}): + Rp ${receiptSuccessInfo.tambahanNominal.toLocaleString('id-ID')}`
+                    : '';
+
+                  const textMessage = isNonTagihan
+                    ? `Assalamualaikum wr.wb.\n\n*BUKTI TANDA TERIMA DANA RT 08* ✅\n\nHalo Bapak/Ibu *${receiptSuccessInfo.nama}*,\nAlhamdulillah, telah kami terima dana/pemasukan dari Bapak/Ibu dengan rincian sebagai berikut:\n\n*Detail Penerimaan:*\n• Nama: ${receiptSuccessInfo.nama}\n• Unit: ${detailLoc}\n• Kategori: ${receiptSuccessInfo.category}\n• Keterangan: ${receiptSuccessInfo.catatan || '-'}\n• Total Diterima: Rp ${receiptSuccessInfo.nominal.toLocaleString('id-ID')}\n• Tanggal: ${receiptSuccessInfo.tanggalBayar} ${receiptSuccessInfo.jamBayar !== '00:00' ? receiptSuccessInfo.jamBayar : ''}\n• Rekening/Kas Penerima: KAS ${receiptSuccessInfo.kasPenerima.toUpperCase()}\n• Petugas Penerima: ${receiptSuccessInfo.petugas}\n\n*Status:* TELAH DITERIMA & TERCATAT RESMI 🟢\n\nTerima kasih banyak atas partisipasi, kebaikan, dan kontribusi Bapak/Ibu dalam mendukung program dan kegiatan lingkungan RT 08 Perumahan TAS 3. Semoga menjadi berkah dan bermanfaat bagi seluruh warga.\n\nSalam hangat,\n*Pengurus RT 08 Perumahan TAS 3* 🙏`
+                    : `Assalamualaikum wr.wb.\n\n*BUKTI PENERIMAAN RT 08* ✅\n\nHalo Bapak/Ibu *${receiptSuccessInfo.nama}*,\nTerima kasih, penerimaan iuran dan dana RT Anda telah sukses kami verifikasi.\n\n*Detail Penerimaan:*\n• Nama: ${receiptSuccessInfo.nama}\n• Unit: ${detailLoc}\n• Kategori: ${receiptSuccessInfo.category}${tipeBayarText}\n• Periode: ${periodeText}${diskonText}${rincianTambahanText}\n• Total Diterima: Rp ${receiptSuccessInfo.nominal.toLocaleString('id-ID')}\n• Tanggal: ${receiptSuccessInfo.tanggalBayar} ${receiptSuccessInfo.jamBayar}\n• Penerima: KAS ${receiptSuccessInfo.kasPenerima.toUpperCase()}\n• Petugas: ${receiptSuccessInfo.petugas}\n\n*Status:* TELAH DITERIMA & LUNAS RESMI 🟢\n\nTerima kasih atas partisipasi aktif Bapak/Ibu dalam mendukung program pembangunan lingkungan RT 08 Perumahan TAS 3.\n\nSalam hangat,\n*Pengurus RT 08 Perumahan TAS 3* 🙏`;
                   
                   if (noWaFmt) {
                     const url = `https://api.whatsapp.com/send?phone=${noWaFmt}&text=${encodeURIComponent(textMessage)}`;
@@ -9388,6 +10187,8 @@ export default function TagihanWarga({
                     ? `Blok ${receiptSuccessInfo.blok}-${receiptSuccessInfo.noRumah}`
                     : `No Lapak ${receiptSuccessInfo.noLapak}`;
 
+                  const isNonTagihan = receiptSuccessInfo.isNonTagihan;
+
                   const isBatch = receiptSuccessInfo.bulan.includes(',');
                   const numMonths = isBatch ? receiptSuccessInfo.bulan.split(',').length : 1;
                   const tipeBayarText = isBatch ? `\n• Jenis: Pembayaran Kolektif (${numMonths} Bulan)` : '';
@@ -9401,7 +10202,13 @@ export default function TagihanWarga({
                     diskonText = `\n• Diskon Potongan: Rp ${receiptSuccessInfo.diskon.toLocaleString('id-ID')} (${receiptSuccessInfo.alasanDiskon || 'Kebijakan RT'})`;
                   }
 
-                  const textMessage = `Assalamualaikum wr.wb.\n\n*BUKTI PEMBAYARAN IURAN RT 08* ✅\n\nHalo Bapak/Ibu *${receiptSuccessInfo.nama}*,\nTerima kasih, pembayaran Iuran Anda telah sukses kami verifikasi.\n\n*Detail Pembayaran:*\n• Nama: ${receiptSuccessInfo.nama}\n• Unit: ${detailLoc}\n• Kategori: ${receiptSuccessInfo.category}${tipeBayarText}\n• Periode: ${periodeText}${diskonText}\n• Total Bayar: Rp ${receiptSuccessInfo.nominal.toLocaleString('id-ID')}\n• Tanggal: ${receiptSuccessInfo.tanggalBayar} ${receiptSuccessInfo.jamBayar}\n• Penerima: KAS ${receiptSuccessInfo.kasPenerima.toUpperCase()}\n• Petugas: ${receiptSuccessInfo.petugas}\n\n*Status:* LUNAS & TERVERIFIKASI 🟢\n\nTerima kasih atas partisipasi aktif Bapak/Ibu dalam mendukung program pembangunan lingkungan RT 08 Perumahan TAS 3.\n\nSalam hangat,\n*Pengurus RT 08 Perumahan TAS 3* 🙏`;
+                  const rincianTambahanText = (receiptSuccessInfo.tambahanNominal && receiptSuccessInfo.tambahanNominal > 0)
+                    ? `\n• Rincian Penerimaan:\n  - Iuran RT: Rp ${(receiptSuccessInfo.pokokNominal || (receiptSuccessInfo.nominal - receiptSuccessInfo.tambahanNominal)).toLocaleString('id-ID')}\n  - Tambahan (${receiptSuccessInfo.tambahanKet || 'Lainnya'}): + Rp ${receiptSuccessInfo.tambahanNominal.toLocaleString('id-ID')}`
+                    : '';
+
+                  const textMessage = isNonTagihan
+                    ? `Assalamualaikum wr.wb.\n\n*BUKTI TANDA TERIMA DANA RT 08* ✅\n\nHalo Bapak/Ibu *${receiptSuccessInfo.nama}*,\nAlhamdulillah, telah kami terima dana/pemasukan dari Bapak/Ibu dengan rincian sebagai berikut:\n\n*Detail Penerimaan:*\n• Nama: ${receiptSuccessInfo.nama}\n• Unit: ${detailLoc}\n• Kategori: ${receiptSuccessInfo.category}\n• Keterangan: ${receiptSuccessInfo.catatan || '-'}\n• Total Diterima: Rp ${receiptSuccessInfo.nominal.toLocaleString('id-ID')}\n• Tanggal: ${receiptSuccessInfo.tanggalBayar} ${receiptSuccessInfo.jamBayar !== '00:00' ? receiptSuccessInfo.jamBayar : ''}\n• Rekening/Kas Penerima: KAS ${receiptSuccessInfo.kasPenerima.toUpperCase()}\n• Petugas Penerima: ${receiptSuccessInfo.petugas}\n\n*Status:* TELAH DITERIMA & TERCATAT RESMI 🟢\n\nTerima kasih banyak atas partisipasi, kebaikan, dan kontribusi Bapak/Ibu dalam mendukung program dan kegiatan lingkungan RT 08 Perumahan TAS 3. Semoga menjadi berkah dan bermanfaat bagi seluruh warga.\n\nSalam hangat,\n*Pengurus RT 08 Perumahan TAS 3* 🙏`
+                    : `Assalamualaikum wr.wb.\n\n*BUKTI PENERIMAAN RT 08* ✅\n\nHalo Bapak/Ibu *${receiptSuccessInfo.nama}*,\nTerima kasih, penerimaan iuran dan dana RT Anda telah sukses kami verifikasi.\n\n*Detail Penerimaan:*\n• Nama: ${receiptSuccessInfo.nama}\n• Unit: ${detailLoc}\n• Kategori: ${receiptSuccessInfo.category}${tipeBayarText}\n• Periode: ${periodeText}${diskonText}${rincianTambahanText}\n• Total Diterima: Rp ${receiptSuccessInfo.nominal.toLocaleString('id-ID')}\n• Tanggal: ${receiptSuccessInfo.tanggalBayar} ${receiptSuccessInfo.jamBayar}\n• Penerima: KAS ${receiptSuccessInfo.kasPenerima.toUpperCase()}\n• Petugas: ${receiptSuccessInfo.petugas}\n\n*Status:* TELAH DITERIMA & LUNAS RESMI 🟢\n\nTerima kasih atas partisipasi aktif Bapak/Ibu dalam mendukung program pembangunan lingkungan RT 08 Perumahan TAS 3.\n\nSalam hangat,\n*Pengurus RT 08 Perumahan TAS 3* 🙏`;
                   
                   const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(textMessage)}`;
                   window.open(url, '_blank');
@@ -11687,6 +12494,31 @@ export default function TagihanWarga({
                                 </button>
                               )}
 
+                              {isLoggedIn && (currentUser?.role === 'admin' || currentUser?.role === 'bendahara' || currentUser?.role === 'sekretaris') && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setIncomeWargaId(w.id);
+                                    setIncomeIsWargaTerdaftar(true);
+                                    setIncomeNominal('');
+                                    setIncomeKategori('Pembayaran Tambahan RT');
+                                    setIncomeCustomKategori('');
+                                    setIncomeDeskripsi(`Pembayaran Tambahan RT - Bpk/Ibu ${w.nama} (Blok ${w.blok}-${w.noRumah})`);
+                                    setIncomeKasPenerima('rtTunai');
+                                    setIncomeTanggal(new Date().toISOString().split('T')[0]);
+                                    setIncomePetugas(currentUser?.nama || 'Bendahara RT');
+                                    setIncomeFotoBase64('');
+                                    setIncomeFotoNamaFile('');
+                                    setShowAddIncomeModal(true);
+                                    setActiveDropdownWarga(null);
+                                  }}
+                                  className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-emerald-700 hover:bg-emerald-50 transition text-left font-semibold cursor-pointer border-t border-slate-105"
+                                >
+                                  <PlusCircle className="w-3.5 h-3.5 text-emerald-600" />
+                                  <span>+ Bayar Tambahan / Hibah</span>
+                                </button>
+                              )}
+
                               {isLoggedIn && (currentUser?.role === 'admin' || currentUser?.role === 'bendahara') && (
                                 <>
                                   <button
@@ -12548,6 +13380,65 @@ export default function TagihanWarga({
                         </label>
                       </div>
                     </div>
+
+                    {/* Tambahan Pembayaran Lain Manual untuk Notifikasi WA (1 Notifikasi Saja) */}
+                    {activeSubTab === 'warga' && (
+                      <div className="pt-3 border-t border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-3 bg-amber-50/60 p-3 rounded-xl border border-amber-200/70">
+                        <div>
+                          <span className="text-xs font-bold text-amber-950 flex items-center gap-1.5">
+                            <PlusCircle className="w-3.5 h-3.5 text-amber-600" />
+                            + Tambahan Pembayaran Lain (Manual - 1 Notifikasi Saja)
+                          </span>
+                          <p className="text-[11px] text-amber-900/80 mt-0.5">
+                            Ketikkan tambahan pembayaran jika ada (cth: Iuran RT 35.000 + 50.000) agar tergabung dalam 1 draf notifikasi tagihan warga.
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <input
+                            type="text"
+                            placeholder="Keterangan (cth: Sumbangan)"
+                            value={waCustomAdditions[0]?.nama || ''}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setWaCustomAdditions([{
+                                id: 'manual-wa-1',
+                                nama: val,
+                                nominal: waCustomAdditions[0]?.nominal || 0
+                              }]);
+                            }}
+                            className="bg-white border border-amber-300 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 placeholder-slate-400 font-medium focus:ring-2 focus:ring-amber-500 focus:outline-none w-44"
+                          />
+                          <div className="relative">
+                            <span className="absolute left-2.5 top-1.5 text-xs font-mono font-bold text-slate-400">Rp</span>
+                            <input
+                              type="number"
+                              step="1000"
+                              placeholder="50000"
+                              value={waCustomAdditions[0]?.nominal || ''}
+                              onChange={(e) => {
+                                const num = Math.max(0, Number(e.target.value));
+                                setWaCustomAdditions([{
+                                  id: 'manual-wa-1',
+                                  nama: waCustomAdditions[0]?.nama || 'Tambahan Pembayaran',
+                                  nominal: num
+                                }]);
+                              }}
+                              className="bg-white border border-amber-300 rounded-xl pl-8 pr-2.5 py-1.5 text-xs text-slate-900 font-bold font-mono focus:ring-2 focus:ring-amber-500 focus:outline-none w-32"
+                            />
+                          </div>
+                          {(waCustomAdditions[0]?.nominal > 0 || waCustomAdditions[0]?.nama) && (
+                            <button
+                              type="button"
+                              onClick={() => setWaCustomAdditions([])}
+                              className="px-2.5 py-1.5 bg-amber-200/70 hover:bg-amber-300 text-amber-900 rounded-xl text-xs font-bold transition cursor-pointer"
+                              title="Hapus Tambahan Manual"
+                            >
+                              Reset
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

@@ -2310,9 +2310,9 @@ export default function App() {
     await handleUpdateRombongList(snapData.rombongList);
   };
 
-  // Run once when admin logged-in / loaded to capture daily auto snapshot backup in localStorage
+  // Run once when admin / pengurus logged-in / loaded to capture daily auto snapshot backup in localStorage
   useEffect(() => {
-    if (!currentUser || currentUser.role !== 'admin' || hasAutoBackedUpRef.current) return;
+    if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'sekretaris' && currentUser.role !== 'bendahara') || hasAutoBackedUpRef.current) return;
     if (wargaList.length === 0 && ledger.length === 0) return; // avoid backup of empty states before fully loaded
 
     hasAutoBackedUpRef.current = true;
@@ -2330,7 +2330,7 @@ export default function App() {
           rombongList
         });
 
-        const updated = [newSnap, ...snapshots.filter(s => s.id !== newSnap.id)].slice(0, 20); // Keep last 20 elements
+        const updated = [newSnap, ...snapshots.filter(s => s.id !== newSnap.id)].slice(0, 10);
         saveStoredSnapshots(updated);
         console.info('✓ Captured daily auto snapshot backup in localStorage.');
       }

@@ -15,6 +15,9 @@ export interface ReceiptInfo {
   kasPenerima: string;
   petugas: string;
   catatan?: string;
+  pokokNominal?: number;
+  tambahanNominal?: number;
+  tambahanKet?: string;
 }
 
 export const getTerbilang = (nilai: number): string => {
@@ -97,7 +100,7 @@ export const drawReceiptOnCanvas = (receiptInfo: ReceiptInfo, canvas: HTMLCanvas
   ctx.textAlign = 'right';
   ctx.fillStyle = '#0f172a';
   ctx.font = '900 22px "Helvetica Neue", Arial, sans-serif';
-  ctx.fillText('KUITANSI / NOTA', 750, 55);
+  ctx.fillText('BUKTI PENERIMAAN RT', 750, 55);
 
   // Receipt No
   const detailLoc = receiptInfo.tipe === 'rombong'
@@ -138,14 +141,30 @@ export const drawReceiptOnCanvas = (receiptInfo: ReceiptInfo, canvas: HTMLCanvas
     ? rawNama 
     : `Bapak/Ibu ${rawNama}`;
 
-  const fields = [
+  const fields: { label: string; value: string; isHighlight?: boolean; isItalic?: boolean }[] = [
     { label: 'TELAH DITERIMA DARI', value: nameFormatted, isHighlight: true },
     { label: 'WILAYAH / LOKASI', value: detailLoc },
-    { label: 'KATEGORI PEMASUKAN', value: receiptInfo.category || 'Pemasukan Kas' },
+    { label: 'KATEGORI PENERIMAAN', value: receiptInfo.category || 'Penerimaan Kas RT' },
     { label: 'PERIODE / TANGGAL', value: periodeValue },
+  ];
+
+  if (receiptInfo.tambahanNominal && receiptInfo.tambahanNominal > 0) {
+    const pokok = receiptInfo.pokokNominal || (receiptInfo.nominal - receiptInfo.tambahanNominal);
+    fields.push({
+      label: 'IURAN POKOK RT',
+      value: `Rp ${pokok.toLocaleString('id-ID')}`
+    });
+    fields.push({
+      label: 'TAMBAHAN PEMBAYARAN',
+      value: `+ Rp ${receiptInfo.tambahanNominal.toLocaleString('id-ID')} (${receiptInfo.tambahanKet || 'Tambahan Manual'})`,
+      isHighlight: true
+    });
+  }
+
+  fields.push(
     { label: 'TERBILANG (UANG)', value: getTerbilang(receiptInfo.nominal) + ' Rupiah', isItalic: true },
     { label: 'CATATAN / KETERANGAN', value: receiptInfo.catatan || '-' }
-  ];
+  );
 
   fields.forEach(field => {
     let fontStyle = 'bold 11px "Helvetica Neue", Arial, sans-serif';

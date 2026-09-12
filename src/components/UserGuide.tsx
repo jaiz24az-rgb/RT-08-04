@@ -43,6 +43,7 @@ import {
   Github
 } from 'lucide-react';
 import { Balance, LedgerEntry, WargaBill, RombongBill, AppUser } from '../types';
+import { createSnapshotItem, getStoredSnapshots, saveStoredSnapshots } from '../utils/snapshotHelper';
 import {
   signInWithGoogleForWorkspace,
   logoutWorkspace,
@@ -457,6 +458,20 @@ export default function UserGuide({
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
+
+      // Register checkpoint immediately into local device snapshot list
+      try {
+        const exportSnap = createSnapshotItem(
+          `Unduhan Cadangan JSON (${ledger.length} Transaksi, ${wargaList.length} Warga)`,
+          'export',
+          { kas, ledger, wargaList, rombongList }
+        );
+        const existing = getStoredSnapshots();
+        const updated = [exportSnap, ...existing.filter(s => s.id !== exportSnap.id)].slice(0, 10);
+        saveStoredSnapshots(updated);
+      } catch (snapErr) {
+        console.warn('Gagal mencatat snapshot lokal saat ekspor:', snapErr);
+      }
     } catch (err) {
       alert('Gagal mengekspor data cadangan: ' + (err as Error).message);
     }
