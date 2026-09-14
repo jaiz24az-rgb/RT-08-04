@@ -18,6 +18,7 @@ import {
   ShieldAlert
 } from 'lucide-react';
 import { AppUser } from '../types';
+import { PWAInstallButton } from './PWAInstallButton';
 
 interface LandingPageProps {
   users: AppUser[];
@@ -168,13 +169,16 @@ export default function LandingPage({
           <div className="space-y-3.5">
             <div className="flex items-center justify-center lg:justify-start">
               <div className="w-20 h-20 rounded-3xl overflow-hidden bg-slate-950 p-0.5 border border-sky-400/40 shadow-xl shadow-sky-500/15 mb-2 hover:scale-105 transition duration-300">
-                <img src={appLogo || "/favicon.png"} alt="App Logo" className="w-full h-full object-cover rounded-[22px]" referrerPolicy="no-referrer" />
+                <img src={appLogo || "/icon-192.png"} alt="App Logo" className="w-full h-full object-cover rounded-[22px]" referrerPolicy="no-referrer" />
               </div>
             </div>
-            <span className="inline-flex items-center gap-1.5 bg-sky-500/10 text-sky-300 px-3.5 py-1.5 rounded-full text-xs font-black tracking-wider uppercase font-mono">
-              <Sparkles className="w-3.5 h-3.5 text-sky-400" />
-              SISTEM DIGITALISASI {labelWargaPlural.toUpperCase()} &amp; {labelRombongPlural.toUpperCase()}
-            </span>
+            <div className="flex flex-wrap items-center justify-center lg:justify-start gap-2.5">
+              <span className="inline-flex items-center gap-1.5 bg-sky-500/10 text-sky-300 px-3.5 py-1.5 rounded-full text-xs font-black tracking-wider uppercase font-mono">
+                <Sparkles className="w-3.5 h-3.5 text-sky-400" />
+                SISTEM DIGITALISASI {labelWargaPlural.toUpperCase()} &amp; {labelRombongPlural.toUpperCase()}
+              </span>
+              <PWAInstallButton appLogo={appLogo} appName={appName} className="bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-400/30" />
+            </div>
             <h2 className="text-3xl md:text-4xl lg:text-5xl font-black text-white tracking-tight leading-tight bg-gradient-to-r from-white via-slate-100 to-slate-400 bg-clip-text text-transparent whitespace-pre-line">
               {appName}
             </h2>

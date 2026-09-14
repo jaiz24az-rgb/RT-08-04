@@ -53,6 +53,7 @@ import UserManagementModal from './components/UserManagementModal';
 import LandingPage from './components/LandingPage';
 import Undangan from './components/Undangan';
 import { KuponAcara } from './components/KuponAcara';
+import { PWAInstallButton } from './components/PWAInstallButton';
 import { 
   Coins, 
   LayoutDashboard, 
@@ -588,63 +589,20 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('perumtas_rt08_app_logo', appLogo);
 
-    // Dynamically update favicon and PWA icons in the browser DOM
-    const logoUrl = appLogo || '/favicon.png';
-    
-    // 1. Update Favicon and Apple Touch Icon
+    // Dynamically update favicon and Apple Touch Icon in the browser DOM
     const favLink = document.querySelector("link[rel='icon']") as HTMLLinkElement;
     if (favLink) {
-      favLink.href = logoUrl;
+      favLink.href = appLogo || '/favicon-32x32.png';
     }
     const appleLink = document.querySelector("link[rel='apple-touch-icon']") as HTMLLinkElement;
     if (appleLink) {
-      appleLink.href = logoUrl;
+      appleLink.href = appLogo || '/apple-touch-icon.png';
     }
 
-    // 2. Update Web Manifest dynamically to allow browsers to detect icon/name updates
+    // Keep static /manifest.json link so Android Chrome & WebAPK service can download and compile real PNG icons
     const currentManifestLink = document.querySelector("link[rel='manifest']") as HTMLLinkElement;
-    if (currentManifestLink) {
-      const manifestData = {
-        name: `Buku Kas & Registrasi ${appName || 'RT.008'}`,
-        short_name: appName || "RT.008 App",
-        description: `Sistem Pengelolaan Kas, Tagihan Iuran Warga & Buku Kerja Ketua ${appName || 'RT.008'}`,
-        start_url: "/",
-        id: "/",
-        display: "standalone",
-        orientation: "portrait-primary",
-        background_color: "#0f172a",
-        theme_color: "#0284c7",
-        icons: [
-          {
-            src: logoUrl,
-            sizes: "512x512",
-            type: "image/png",
-            purpose: "any maskable"
-          },
-          {
-            src: logoUrl,
-            sizes: "192x192",
-            type: "image/png",
-            purpose: "any"
-          },
-          {
-            src: logoUrl,
-            sizes: "512x512",
-            type: "image/png",
-            purpose: "any"
-          }
-        ]
-      };
-      
-      const stringified = JSON.stringify(manifestData);
-      const blob = new Blob([stringified], { type: 'application/json' });
-      const manifestBlobUrl = URL.createObjectURL(blob);
-      
-      currentManifestLink.href = manifestBlobUrl;
-      
-      return () => {
-        URL.revokeObjectURL(manifestBlobUrl);
-      };
+    if (currentManifestLink && currentManifestLink.getAttribute('href') !== '/manifest.json') {
+      currentManifestLink.href = '/manifest.json';
     }
   }, [appLogo, appName]);
 
@@ -2378,7 +2336,7 @@ export default function App() {
         <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl overflow-hidden bg-slate-950 p-0.5 border border-sky-400/30 shadow-md shadow-sky-500/10">
-              <img src={appLogo || "/favicon.png"} alt="App Logo" className="w-full h-full object-cover rounded-[10px]" referrerPolicy="no-referrer" />
+              <img src={appLogo || "/icon-192.png"} alt="App Logo" className="w-full h-full object-cover rounded-[10px]" referrerPolicy="no-referrer" />
             </div>
             <div>
               <h1 className="text-lg md:text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-1.5 leading-none">
@@ -2467,6 +2425,9 @@ export default function App() {
             </div>
 
 
+
+            {/* PWA Install App Button */}
+            <PWAInstallButton appLogo={appLogo} appName={appName} />
 
             {/* Admin Login Indicator Button */}
             {isLoggedIn ? (

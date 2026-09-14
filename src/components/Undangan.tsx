@@ -4149,7 +4149,7 @@ _Pesan Whatsapp ini dikirim secara resmi melalui Sistem Informasi Administrasi R
                   <div className="flex flex-col sm:flex-row items-center gap-4 bg-slate-50 p-3.5 rounded-2xl border border-slate-200">
                     <div className="w-16 h-16 rounded-2xl bg-slate-950 p-1 flex items-center justify-center border border-sky-400/20 shadow-inner shrink-0 relative overflow-hidden">
                       <img 
-                        src={localAppLogo || '/favicon.png'} 
+                        src={localAppLogo || '/icon-192.png'} 
                         alt="Logo Preview" 
                         className="w-full h-full object-cover rounded-xl" 
                         referrerPolicy="no-referrer"
